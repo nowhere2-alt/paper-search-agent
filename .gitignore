@@ -1,0 +1,6 @@
+__pycache__/
+*.pyc
+.venv/
+.env
+# PDF 只存在本機（或 Actions artifact），解析文章與快報才進 git
+library/**/*.pdf

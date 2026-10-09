@@ -1,0 +1,31 @@
+
+output_dir: library            # 論文、解析文章、每日快報都存在這裡
+lookback_days: 3               # 每次往回搜尋幾天（每天跑時設 2–3 天，避免漏掉延遲上架的論文）
+max_results_per_source: 50     # 每個資料庫每次最多抓幾篇
+min_relevance: 3               # 相關性 1–5，低於此分數的只記錄、不下載不解析
+max_analyses_per_topic: 10     # 每個主題每天最多深度解析幾篇（控制 API 花費）
+
+claude:
+  model: claude-opus-5-5
+  language: 繁體中文
+  analysis_effort: high        # low / medium / high / xhigh / max；越高越深入也越貴
+
+topics:
+  - name: 生成式 AI 在觀光餐旅業的應用
+    folder: genai_hospitality  # library/ 底下的資料夾名稱（建議英文）
+    description: >
+      研究 ChatGPT 等大型語言模型如何影響旅客決策、服務接觸與餐旅業營運，
+      特別關注消費者信任與採用意願。
+    keywords:
+      - generative AI tourism
+      - ChatGPT hospitality
+      - large language model travel
+      - AI chatbot hotel
+    sources: [openalex, semantic_scholar, arxiv]   # 可用：arxiv, semantic_scholar, openalex
+    min_relevance: 3
+    # 分類 = 子資料夾。key 是資料夾名，value 是給 Claude 看的分類說明
+    categories:
+      consumer_behavior: 旅客/消費者對 AI 的態度、信任、採用意願、決策行為
+      service_operations: 飯店、餐廳、旅行社導入 AI 的營運、服務流程、員工影響
+      marketing_content: AI 生成的行銷內容、評論、目的地形象
+      methods_review: 文獻回顧、研究方法、量表發展

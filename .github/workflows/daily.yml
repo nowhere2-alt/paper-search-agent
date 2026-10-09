@@ -1,0 +1,39 @@
+# 每天自動執行一次，把解析文章與每日快報 commit 回 repo（PDF 太大不進 git，改存成 Actions artifact）。
+# 需先到 GitHub repo → Settings → Secrets and variables → Actions 新增 ANTHROPIC_API_KEY。
+name: daily-papers
+
+on:
+  schedule:
+    - cron: "17 22 * * *"   # UTC 22:17 = 台灣時間早上 06:17
+  workflow_dispatch: {}      # 也可以在 Actions 頁面手動觸發
+
+permissions:
+  contents: write
+
+jobs:
+  run:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - run: pip install -r requirements.txt
+      - run: python -m paper_agent --config config.yaml
+        env:
+          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+          S2_API_KEY: ${{ secrets.S2_API_KEY }}
+          OPENALEX_EMAIL: ${{ secrets.OPENALEX_EMAIL }}
+      - uses: actions/upload-artifact@v4
+        with:
+          name: pdfs-${{ github.run_id }}
+          path: library/**/*.pdf
+          if-no-files-found: ignore
+          retention-days: 30
+      - name: Commit analyses and digests
+        run: |
+          git config user.name "paper-agent-bot"
+          git config user.email "paper-agent-bot@users.noreply.github.com"
+          git add library
+          git diff --cached --quiet || git commit -m "Daily papers $(date -u +%F)"
+          git push
