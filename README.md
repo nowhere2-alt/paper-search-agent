@@ -108,6 +108,14 @@ python -m paper_agent --list-journals
 | ScienceDirect（沒有 `ELSEVIER_API_KEY`） | sciencedirect.com（只搜 Elsevier 期刊） |
 | Crossref 查詢失敗、或期刊查不到 ISSN | 依期刊出版社：Taylor & Francis、SAGE、Emerald、Wiley、Springer 的網站 |
 
+如果瀏覽器被網站判定為機器人而擋下（或搜尋失敗、沒有開啟瀏覽器備援），程式會**改讀這些期刊的 RSS**。RSS 是出版社提供給程式讀取最新文章的管道，讀到後一樣用關鍵字篩選，再進入分類與解析流程。
+
+- **自動產生**：Elsevier 與 Wiley 期刊的 RSS 網址會依 ISSN 自動產生。
+- **手動填寫**：其他出版社的期刊，請在 `journals.yaml` 該期刊加上 `rss: "網址"`（從期刊首頁的 RSS 圖示複製）。
+- **dry-run 也能用**：RSS 不需要 AI，`--dry-run` 也會讀 RSS，可以先用它測試。
+
+> **為什麼不用 Firecrawl 這類服務繞過阻擋？** 網站擋下自動化操作，是它的存取規則。改用代理 IP 或規避偵測的爬蟲服務繞過，可能違反出版社與 Clarivate 的使用條款。學校的訂閱授權通常也禁止這種行為，被發現時可能導致整個學校的存取權被暫停。所以本專案被擋時只會改走 RSS，不會嘗試繞過。
+
 ### 設定步驟
 
 ```bash

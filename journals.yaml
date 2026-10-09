@@ -5,6 +5,10 @@
 # 執行 `python -m paper_agent --list-journals` 可以檢查查到的 ISSN；查錯或查不到時，
 # 在該期刊加上 issn: ["xxxx-xxxx", "yyyy-yyyy"] 手動指定即可。
 # publisher 用來決定要不要呼叫出版社的 API（目前支援 Elsevier ScienceDirect），其他出版社透過 Crossref 取得。
+#
+# rss（選填）：期刊最新文章的 RSS 網址。API 失敗且瀏覽器備援被網站擋下（或沒開啟）時，會改讀 RSS。
+# Elsevier 與 Wiley 期刊會依 ISSN 自動產生，不用填；其他出版社請到期刊首頁點 RSS 圖示，複製網址，例如：
+#   - {name: Journal of Sustainable Tourism, publisher: Taylor & Francis, rss: "https://www.tandfonline.com/feed/rss/rsus20"}
 
 tiers:
   - tier: 1

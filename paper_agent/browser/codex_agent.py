@@ -17,6 +17,7 @@ from pathlib import Path
 from ..journals import Journal
 from ..models import Paper
 from .agent import SYSTEM, _prompt
+from .result import BrowserResult
 from .sites import SITES
 
 log = logging.getLogger(__name__)
@@ -79,7 +80,7 @@ def mcp_overrides(bcfg: dict) -> list[str]:
 
 
 def run_browser_search_codex(site_key: str, keywords: list[str], journals: list[Journal],
-                             since: date, limit: int, cfg: dict, llm) -> list[Paper]:
+                             since: date, limit: int, cfg: dict, llm) -> BrowserResult:
     site = SITES[site_key]
     bcfg = cfg.get("browser", {})
     hosts = ", ".join(site["allowed_hosts"] + bcfg.get("extra_allowed_hosts", []))
@@ -98,12 +99,12 @@ describe it in "problem" (for example "login_required: ...") and return the arti
     text = llm.run(prompt, schema=SCHEMA, effort=bcfg.get("effort", "medium"), sandbox="read-only",
                    extra_args=mcp_overrides(bcfg), timeout=bcfg.get("timeout_sec", 1200))
     if not text:
-        return []
+        return BrowserResult([], blocked=True)
     try:
         data = json.loads(text)
     except json.JSONDecodeError:
         log.warning("[codex-browser:%s] 結果不是合法 JSON", site_key)
-        return []
+        return BrowserResult([], blocked=True)
     if data.get("problem"):
         log.warning("[codex-browser:%s] 無法完成搜尋：%s", site_key, data["problem"])
         if data["problem"].startswith("login_required") and site.get("needs_login"):
@@ -119,4 +120,4 @@ describe it in "problem" (for example "login_required: ...") and return the arti
             published=r["publication_date"] or None, venue=r["journal"],
         ))
     log.info("[codex-browser:%s] 回報 %d 篇", site_key, len(papers))
-    return papers
+    return BrowserResult(papers, blocked=bool(data.get("problem")))

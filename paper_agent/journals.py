@@ -22,6 +22,7 @@ class Journal:
     tier: int = 1
     field: str = ""
     issns: list[str] = dc_field(default_factory=list)
+    rss: str = ""  # 期刊最新文章 RSS 網址（選填）
 
 
 @dataclass
@@ -91,7 +92,8 @@ def load_tiers(path: Path, cache_path: Path) -> list[Tier]:
                 else:
                     log.warning("找不到期刊 ISSN：%s（可在 journals.yaml 手動加上 issn）", j["name"])
             journals.append(Journal(name=j["name"], publisher=j.get("publisher", ""),
-                                    tier=t["tier"], field=j.get("field", ""), issns=issns))
+                                    tier=t["tier"], field=j.get("field", ""), issns=issns,
+                                    rss=j.get("rss", "")))
         tiers.append(Tier(tier=t["tier"], label=t.get("label", f"Tier {t['tier']}"), journals=journals))
     cache_path.parent.mkdir(parents=True, exist_ok=True)
     cache_path.write_text(json.dumps(cache, ensure_ascii=False, indent=2), encoding="utf-8")

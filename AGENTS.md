@@ -40,7 +40,10 @@ access; do not work around the sandbox.
 
 - User-facing text (logs, comments, README, generated articles) is Traditional Chinese; identifiers are English.
 - Each source module exposes `search(keywords, since, limit, cfg, journals=None) -> list[Paper]` and raises
-  `SourceUnavailable` when its API cannot be used, which triggers the browser fallback.
+  `SourceUnavailable` when its API cannot be used, which triggers the fallback chain in
+  `paper_agent/browser/__init__.py`: browser search, then journal RSS (`sources/rss.py`) when the browser is
+  blocked, fails, or is off. A site that blocks automation is not retried through other means (stealth
+  scraping services, proxy rotation, CAPTCHA solvers); RSS is the sanctioned path.
 - Do not commit `library/` from an agent session (only the daily workflows commit it), API keys, or browser
   profiles (`~/.paper-agent/`).
 - Do not add scraping of publisher sites outside the browser fallback, and do not add anything that hides

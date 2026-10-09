@@ -13,6 +13,7 @@ tier_min_results: 5            # fallback 的門檻：累計幾篇高相關論�
 # 需要先安裝：pip install playwright && playwright install chromium
 # 對應關係：wos → Web of Science 網站；sciencedirect → ScienceDirect 網站；
 #           crossref 查不到的期刊 → 依 publisher 到 Taylor & Francis / SAGE / Emerald / Wiley / Springer 網站
+# 瀏覽器被網站判定為機器人而擋下、失敗或沒開啟時，改讀期刊 RSS（見 journals.yaml 的 rss 欄位），不會嘗試繞過阻擋。
 browser:
   enabled: true
   headless: true               # 想看 Claude 怎麼操作就改成 false

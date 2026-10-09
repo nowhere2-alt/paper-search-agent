@@ -35,8 +35,9 @@ def collect(topic: dict, since: date, limit: int, journals: list[Journal] | None
             missing = e.journals if isinstance(e, SourceUnavailable) and e.journals else journals
             papers = list(e.partial) if isinstance(e, SourceUnavailable) else []
             log.warning("[%s] API 無法使用：%s", name, e)
-            if use_browser:
-                papers += browser_fallback(name, topic["keywords"], missing, since, limit, cfg)
+            # 備援：瀏覽器（dry-run 時不啟動）→ 被擋或無法使用時改讀期刊 RSS
+            papers += browser_fallback(name, topic["keywords"], missing, since, limit, cfg,
+                                       allow_browser=use_browser)
         log.info("[%s] 找到 %d 篇", name, len(papers))
         for p in papers:
             if not p.title:

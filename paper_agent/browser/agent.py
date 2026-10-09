@@ -16,6 +16,7 @@ from anthropic import beta_tool
 
 from ..journals import Journal
 from ..models import Paper
+from .result import BrowserResult
 from .sites import SITES
 
 log = logging.getLogger(__name__)
@@ -57,7 +58,7 @@ Report at most {limit} articles, newest first. Include the DOI whenever the page
 
 
 def run_browser_search(site_key: str, keywords: list[str], journals: list[Journal],
-                       since: date, limit: int, cfg: dict) -> list[Paper]:
+                       since: date, limit: int, cfg: dict) -> BrowserResult:
     from .driver import PlaywrightBrowser  # 延遲載入 Playwright
 
     site = SITES[site_key]
@@ -132,4 +133,4 @@ def run_browser_search(site_key: str, keywords: list[str], journals: list[Journa
         if p.startswith("login_required") and site.get("needs_login"):
             log.warning("  請先執行 python -m paper_agent --browser-login %s 手動登入", site_key)
     log.info("[browser:%s] 回報 %d 篇", site_key, len(found))
-    return list(found.values())
+    return BrowserResult(list(found.values()), blocked=bool(problems))
