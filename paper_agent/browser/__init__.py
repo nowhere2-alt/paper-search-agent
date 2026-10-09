@@ -23,11 +23,24 @@ def browser_fallback(source: str, keywords: list[str], journals: list[Journal] |
     target = FALLBACK_FOR.get(source)
     if not target or not journals:
         return []  # 只在期刊清單模式下備援，避免漫無邊際地瀏覽
-    try:
-        from .agent import run_browser_search
-    except ImportError:
-        log.warning("未安裝 Playwright，無法使用瀏覽器備援（pip install playwright && playwright install chromium）")
-        return []
+    if cfg.get("engine", "claude") == "codex":
+        from ..codex_llm import CodexLLM
+        from .codex_agent import run_browser_search_codex
+
+        llm = CodexLLM(cfg.get("codex", {}), language=cfg.get("codex", {}).get("language", "繁體中文"))
+
+        def search_site(site_key, js):
+            return run_browser_search_codex(site_key, keywords, js, since, limit, cfg, llm)
+    else:
+        try:
+            from . import agent
+            import playwright  # noqa: F401
+        except ImportError:
+            log.warning("未安裝 Playwright，無法使用瀏覽器備援（pip install playwright && playwright install chromium）")
+            return []
+
+        def search_site(site_key, js):
+            return agent.run_browser_search(site_key, keywords, js, since, limit, cfg)
 
     if target == "publisher":
         groups: dict[str, list[Journal]] = defaultdict(list)
@@ -44,7 +57,7 @@ def browser_fallback(source: str, keywords: list[str], journals: list[Journal] |
         if not js:
             continue
         try:
-            papers += run_browser_search(site_key, keywords, js, since, limit, cfg)
+            papers += search_site(site_key, js)
         except Exception as e:  # 瀏覽器啟動失敗、網站錯誤等，不影響其他來源
             log.error("[browser:%s] 瀏覽器搜尋失敗：%s: %s", site_key, type(e).__name__, e)
     return papers

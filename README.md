@@ -174,6 +174,40 @@ python -m paper_agent --browser-login wos     # 開啟瀏覽器，用學校帳�
 
 已處理過的論文會記在 `library/.state/papers.db`，重跑不會重複下載或重複分析。
 
+## Codex 版
+
+如果你用的是 OpenAI Codex，而不是 Claude，請改用 Codex 版：`config.codex.yaml`。搜尋、去重、分類存檔、每日快報的流程完全相同，差別是需要 AI 的步驟改由 **Codex CLI（`codex exec`）** 執行，不需要 Anthropic API 金鑰。
+
+### 原版在 Codex 環境的相容性
+
+| 項目 | 原版（Claude） | 在 Codex 環境 | Codex 版的做法 |
+|---|---|---|---|
+| 分類、解析、每日總覽 | Anthropic API（需 `ANTHROPIC_API_KEY`） | ✗ Codex 使用者通常沒有這把金鑰 | 改呼叫 `codex exec`，使用你的 Codex 登入或 `CODEX_API_KEY` |
+| 讀 PDF 全文 | PDF 直接交給 Claude | ✗ `codex exec` 無法附加 PDF（只能附圖片） | 先用 pypdf 擷取文字，再交給 Codex |
+| 瀏覽器備援 | Claude browser use toolset | ✗ Anthropic 專屬功能 | 改用 Codex + Playwright MCP |
+| 學術 API 連線 | 程式直接連線 | ⚠ Codex 沙箱預設沒有網路（CLI 的 workspace-write、cloud 的 agent 階段都是） | 在你自己的終端機或排程執行，不要放進 Codex 沙箱裡跑 |
+| 金鑰 | 環境變數 | ⚠ Codex cloud 的 secrets 只在 setup 階段可用 | 本機或 GitHub Actions 執行 |
+| 每天自動執行、保存紀錄 | cron / GitHub Actions | ⚠ Codex cloud 的容器不會長期保存，也沒有排程 | 本機 cron 或 `daily-codex.yml` |
+| 給 AI 看的專案說明 | 無 | Codex 會讀 `AGENTS.md` | 已新增 `AGENTS.md` |
+
+### 使用方式
+
+```bash
+npm install -g @openai/codex
+codex login                       # 用 ChatGPT 帳號登入；或設定 CODEX_API_KEY
+pip install -r requirements.txt
+python -m paper_agent --config config.codex.yaml --dry-run --days 14
+python -m paper_agent --config config.codex.yaml
+```
+
+- **每一次 `codex exec` 都隔離執行**：在空的暫存資料夾、唯讀沙箱（read-only，沒有網路）中執行，論文內容只透過標準輸入傳入。即使 PDF 裡藏有惡意指令，Codex 也無法執行有副作用的動作。
+- **模型與推理強度**：在 `config.codex.yaml` 的 `codex` 區塊設定。`model` 不填就用 Codex 的預設模型；`analysis_effort` 對應 Codex 的 `model_reasoning_effort`。
+- **瀏覽器備援**：需要 Node.js（用 `npx` 啟動 `@playwright/mcp`）。第一次使用先執行 `python -m paper_agent --config config.codex.yaml --browser-login wos` 登入。
+- **安全性比 Claude 版弱**：Codex 版的網域限制主要靠提示詞，因為 Playwright MCP 的 `--allowed-origins` 官方說明它不是安全邊界。建議第一次設 `headless: false` 在旁邊觀察。
+- **每天自動執行**：
+  - 本機：cron 指令加上 `--config config.codex.yaml`。
+  - GitHub Actions：用 `.github/workflows/daily-codex.yml`（需要 `CODEX_API_KEY` secret），並停用 Claude 版的 `daily.yml`。
+
 ## 每天自動執行
 
 **方案 A：本機排程（PDF 留在自己電腦，推薦）**

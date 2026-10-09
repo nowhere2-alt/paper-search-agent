@@ -2,3 +2,4 @@ anthropic>=1.13.0
 requests>=2.31
 PyYAML>=6.0
 playwright>=1.48  # 瀏覽器備援用；另需執行 playwright install chromium
+pypdf>=4.0  # Codex 版：把 PDF 轉成文字交給 Codex

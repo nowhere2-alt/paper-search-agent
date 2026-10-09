@@ -28,7 +28,11 @@ def browser_login(cfg: dict, site_key: str) -> None:
     if site_key not in SITES:
         raise SystemExit(f"未知的網站：{site_key}，可用：{', '.join(SITES)}")
     bcfg = cfg.get("browser", {})
-    profile = Path(os.path.expanduser(bcfg.get("profile_dir", "~/.paper-agent/browser-profile")))
+    if cfg.get("engine", "claude") == "codex":
+        from .browser.codex_agent import codex_profile_dir
+        profile = codex_profile_dir(bcfg)  # 與 Codex 版的 Playwright MCP 共用
+    else:
+        profile = Path(os.path.expanduser(bcfg.get("profile_dir", "~/.paper-agent/browser-profile")))
     profile.mkdir(parents=True, exist_ok=True)
     with sync_playwright() as pw:
         ctx = pw.chromium.launch_persistent_context(str(profile), headless=False,

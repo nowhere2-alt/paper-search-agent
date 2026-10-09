@@ -1,0 +1,65 @@
+# Codex 版設定檔：python -m paper_agent --config config.codex.yaml
+output_dir: library            # 論文、解析文章、每日快報都存在這裡
+lookback_days: 3               # 每次往回搜尋幾天（每天跑時設 2–3 天，避免漏掉延遲上架的論文）
+max_results_per_source: 50     # 每個資料庫每次最多抓幾篇
+min_relevance: 3               # 相關性 1–5，低於此分數的只記錄、不下載不解析
+max_analyses_per_topic: 10     # 每個主題每天最多深度解析幾篇（控制 API 花費）
+
+# 優先期刊清單（見 journals.yaml）
+journal_list: journals.yaml
+tier_strategy: fallback        # fallback：Tier 1 的高相關論文不夠才搜 Tier 2、Tier 3；all：每次都搜全部 tier
+tier_min_results: 5            # fallback 的門檻：累計幾篇高相關論文（≥ min_relevance）就不再往下一層
+
+# 瀏覽器備援：API 無法使用（沒有金鑰、額度用完、連線失敗）時，由 Codex 操作瀏覽器到資料庫網站搜尋。
+# Codex 版透過 Playwright MCP 操作瀏覽器，需要 Node.js（npx）與 pip install playwright && playwright install chromium
+# 對應關係：wos → Web of Science 網站；sciencedirect → ScienceDirect 網站；
+#           crossref 查不到的期刊 → 依 publisher 到 Taylor & Francis / SAGE / Emerald / Wiley / Springer 網站
+browser:
+  enabled: true
+  headless: true               # 想看 Codex 怎麼操作就改成 false
+  codex_profile_dir: ~/.paper-agent/codex-browser-profile   # Codex 版專用的瀏覽器設定檔
+  timeout_sec: 1200            # 每個網站的瀏覽器搜尋最多跑幾秒，控制花費
+  effort: medium
+  extra_allowed_hosts: []      # 學校 SSO 登入網域，例如 [sso.youruniversity.edu.tw]
+
+# Codex 版：分類、解析、瀏覽器備援都由 OpenAI Codex CLI（codex exec）執行，不需要 Anthropic API 金鑰。
+engine: codex
+codex:
+  bin: codex                   # codex 指令的路徑
+  # model: <模型名稱>           # 不填就用 Codex 的預設模型（與 codex -m 相同）
+  language: 繁體中文
+  analysis_effort: high        # 對應 Codex 的 model_reasoning_effort：low / medium / high
+  timeout_sec: 900             # 單次 codex exec 的逾時
+
+topics:
+  - name: 生成式 AI 在觀光餐旅業的應用
+    folder: genai_hospitality  # library/ 底下的資料夾名稱（建議英文）
+    description: >
+      研究 ChatGPT 等大型語言模型如何影響旅客決策、服務接觸與餐旅業營運，
+      特別關注消費者信任與採用意願。
+    keywords:
+      - generative AI tourism
+      - ChatGPT hospitality
+      - large language model travel
+      - AI chatbot hotel
+    # 是否以 journals.yaml 的期刊清單為搜尋範圍（false = 不限期刊，搜尋所有論文）
+    use_journal_list: true
+    # tiers: [1, 2]            # 只搜指定的 tier（預設全部，依 tier_strategy 逐層）
+    open_search: false         # true = 期刊清單搜完後，再做一次不限期刊的搜尋
+    # 順序 = 優先順序：第一個是主要來源，書目資料以它為準；後面的來源補充摘要、PDF 與漏掉的論文
+    # 可用：wos（Web of Science）、sciencedirect（Elsevier 官方 API）、crossref（各出版社登錄的資料）、
+    #       openalex、semantic_scholar、arxiv（arXiv 只在不限期刊時使用）
+    sources: [wos, sciencedirect, crossref, openalex, semantic_scholar]
+    # Web of Science 檢索設定（選填）
+    wos_db: WOS                  # WOS = 核心合集；WOK = 所有資料庫
+    # wos_filter 會以 AND 接在自動產生的檢索式後面，例如只看特定期刊（SO=期刊名稱）：
+    # wos_filter: SO=("TOURISM MANAGEMENT" OR "INTERNATIONAL JOURNAL OF HOSPITALITY MANAGEMENT" OR "ANNALS OF TOURISM RESEARCH")
+    # 或用 wos_query 寫完整的 WoS 進階檢索式（設定後會忽略 keywords 與 wos_filter）：
+    # wos_query: TS=("generative AI" OR ChatGPT) AND SO=("TOURISM MANAGEMENT" OR "ANNALS OF TOURISM RESEARCH") AND PY=(2025-2026)
+    min_relevance: 3
+    # 分類 = 子資料夾。key 是資料夾名，value 是給 Claude 看的分類說明
+    categories:
+      consumer_behavior: 旅客/消費者對 AI 的態度、信任、採用意願、決策行為
+      service_operations: 飯店、餐廳、旅行社導入 AI 的營運、服務流程、員工影響
+      marketing_content: AI 生成的行銷內容、評論、目的地形象
+      methods_review: 文獻回顧、研究方法、量表發展

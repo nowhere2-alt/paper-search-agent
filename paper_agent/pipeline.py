@@ -9,7 +9,7 @@ from pathlib import Path
 from .downloader import download_pdf
 from .enrich import enrich
 from .journals import Journal, load_tiers
-from .llm import LLM
+from .llm import make_llm
 from .browser import browser_fallback
 from .models import Paper, SourceUnavailable
 from .sources import SOURCES
@@ -68,7 +68,7 @@ def search_passes(cfg: dict, topic: dict, root: Path) -> list[tuple[str, int, li
 def run(cfg: dict, days: int | None = None, dry_run: bool = False) -> list[Path]:
     root = Path(cfg.get("output_dir", "library"))
     store = Store(root / ".state" / "papers.db")
-    llm = LLM(cfg.get("claude", {}))
+    llm = None if dry_run else make_llm(cfg)  # engine: claude 或 codex；dry-run 不需要
     lookback = days or cfg.get("lookback_days", 3)
     since = date.today() - timedelta(days=lookback)
     limit = cfg.get("max_results_per_source", 50)
@@ -156,7 +156,7 @@ def _header(p: Paper, r: dict, pdf: Path | None) -> str:
     )
 
 
-def _write_digest(root: Path, topic: dict, items: list[dict], llm: LLM) -> Path:
+def _write_digest(root: Path, topic: dict, items: list[dict], llm) -> Path:
     today = date.today().isoformat()
     path = root / "digests" / f"{today}_{topic['folder']}.md"
     path.parent.mkdir(parents=True, exist_ok=True)
@@ -177,7 +177,8 @@ def _write_digest(root: Path, topic: dict, items: list[dict], llm: LLM) -> Path:
                 if current:
                     lines.append(f"\n### {current}\n")
             link = f"[解析]({Path('..') / it['analysis'].relative_to(root)})" if it["analysis"] else ""
-            lines.append(f"- **[{it['title']}]({it['url']})**　*{it['venue']}*　`{it['category']}`　"
+            venue = f"*{it['venue']}*　" if it["venue"] else ""
+            lines.append(f"- **[{it['title']}]({it['url']})**　{venue}`{it['category']}`　"
                          f"相關性 {it['relevance']}/5 {link}\n  {it['tldr']}")
     path.write_text("\n".join(lines) + "\n", encoding="utf-8")
     log.info("快報已寫入 %s", path)

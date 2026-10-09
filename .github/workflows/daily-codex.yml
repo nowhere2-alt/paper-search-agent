@@ -1,0 +1,50 @@
+# Codex 版每日執行：分類與解析由 OpenAI Codex CLI（codex exec）完成。
+# 使用前：
+#   1. 到 repo 的 Settings → Secrets and variables → Actions 新增 CODEX_API_KEY（OpenAI API 金鑰），
+#      以及要用的資料庫金鑰（WOS_API_KEY、ELSEVIER_API_KEY 等）。
+#   2. 把下面 schedule 的註解拿掉，並停用 Claude 版的 daily.yml，避免同一天跑兩次。
+name: daily-papers-codex
+
+on:
+  # schedule:
+  #   - cron: "17 22 * * *"   # UTC 22:17 = 台灣時間早上 06:17
+  workflow_dispatch: {}
+
+permissions:
+  contents: write
+
+jobs:
+  run:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+      - run: pip install -r requirements.txt
+      - run: npm install -g @openai/codex@0.162.1
+      - run: python -m paper_agent --config config.codex.yaml
+        env:
+          # CODEX_API_KEY 只放在這一步，不設成整個 job 的環境變數
+          CODEX_API_KEY: ${{ secrets.CODEX_API_KEY }}
+          WOS_API_KEY: ${{ secrets.WOS_API_KEY }}
+          ELSEVIER_API_KEY: ${{ secrets.ELSEVIER_API_KEY }}
+          CONTACT_EMAIL: ${{ secrets.CONTACT_EMAIL }}
+          S2_API_KEY: ${{ secrets.S2_API_KEY }}
+          PAPER_AGENT_BROWSER: "0"   # 雲端沒有已登入的瀏覽器，關閉瀏覽器備援
+      - uses: actions/upload-artifact@v4
+        with:
+          name: pdfs-${{ github.run_id }}
+          path: library/**/*.pdf
+          if-no-files-found: ignore
+          retention-days: 30
+      - name: Commit analyses and digests
+        run: |
+          git config user.name "paper-agent-bot"
+          git config user.email "paper-agent-bot@users.noreply.github.com"
+          git add library
+          git diff --cached --quiet || git commit -m "Daily papers (Codex) $(date -u +%F)"
+          git push
