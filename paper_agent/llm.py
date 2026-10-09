@@ -79,7 +79,8 @@ tldr：用{self.language}寫一句話（50 字內）說明這篇論文做了什�
 論文標題：{paper.title}
 作者：{', '.join(paper.authors[:8])}
 發表：{paper.venue or ''} {paper.published or paper.year or ''}
-摘要：{paper.abstract or '（無摘要）'}"""
+作者關鍵字：{', '.join(paper.extra.get('author_keywords', [])) or '（無）'}
+摘要：{paper.abstract or '（無摘要，請依標題與關鍵字判斷）'}"""
         text = self._call(system=system, content=prompt, effort="low",
                           max_tokens=4000, schema=schema)
         if text is None:

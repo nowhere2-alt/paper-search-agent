@@ -7,6 +7,7 @@ from datetime import date, timedelta
 from pathlib import Path
 
 from .downloader import download_pdf
+from .enrich import enrich
 from .llm import LLM
 from .models import Paper
 from .sources import SOURCES
@@ -15,8 +16,12 @@ from .store import Store
 log = logging.getLogger(__name__)
 
 
+MERGE_FIELDS = ("abstract", "pdf_url", "doi", "arxiv_id", "venue", "published")
+
+
 def collect(topic: dict, since: date, limit: int) -> list[Paper]:
-    """從每個指定資料庫抓論文，並跨資料庫去重。"""
+    """依 sources 的順序抓論文並跨資料庫去重。排越前面的來源是主要來源：
+    同一篇論文以主要來源的書目資料為準，缺的欄位（摘要、PDF 連結等）才由後面的來源補上。"""
     found: dict[str, Paper] = {}
     for name in topic.get("sources", list(SOURCES)):
         try:
@@ -29,9 +34,13 @@ def collect(topic: dict, since: date, limit: int) -> list[Paper]:
             if not p.title:
                 continue
             existing = found.get(p.uid)
-            # 同一篇出現在多個資料庫時，保留有 PDF 連結的版本
-            if existing is None or (not existing.pdf_url and p.pdf_url):
+            if existing is None:
                 found[p.uid] = p
+                continue
+            for f in MERGE_FIELDS:
+                if not getattr(existing, f) and getattr(p, f):
+                    setattr(existing, f, getattr(p, f))
+            existing.extra.setdefault("also_in", []).append(name)
     return list(found.values())
 
 
@@ -50,9 +59,12 @@ def run(cfg: dict, days: int | None = None, dry_run: bool = False) -> list[Path]
         log.info("=== 主題：%s ===", topic["name"])
         new = [p for p in collect(topic, since, limit) if not store.seen(p.uid)]
         log.info("新論文 %d 篇", len(new))
+        for p in new:
+            enrich(p)  # WoS 等來源缺摘要／PDF 時，依 DOI 補齊
         if dry_run:
             for p in new:
-                print(f"- {p.title} ({p.source}, {p.published}) PDF={'有' if p.pdf_url else '無'}")
+                print(f"- [{p.source}] {p.title} ({p.venue or ''} {p.published or ''}) "
+                      f"摘要={'有' if p.abstract else '無'} PDF={'有' if p.pdf_url else '無'}")
             continue
 
         # 1) 用摘要分類與評分
@@ -71,6 +83,7 @@ def run(cfg: dict, days: int | None = None, dry_run: bool = False) -> list[Path]
                 store.save(topic["name"], p, r["category"], r["relevance"], r["tldr"], None, None)
                 continue
             cat_dir = topic_dir / r["category"]
+            cat_dir.mkdir(parents=True, exist_ok=True)
             pdf = download_pdf(p, cat_dir)
             analysis_path = None
             if i < max_analyze:
@@ -90,11 +103,15 @@ def run(cfg: dict, days: int | None = None, dry_run: bool = False) -> list[Path]
 
 
 def _header(p: Paper, r: dict, pdf: Path | None) -> str:
+    wos = ""
+    if p.extra.get("wos_uid"):
+        wos = f"- Web of Science：{p.extra['wos_uid']}　WoS 被引次數：{p.extra.get('times_cited') or 0}\n"
     return (
         f"# {p.title}\n\n"
         f"- 作者：{', '.join(p.authors[:10])}{' 等' if len(p.authors) > 10 else ''}\n"
         f"- 發表：{p.venue or ''} {p.published or p.year or ''}\n"
         f"- 連結：{p.url}\n"
+        f"{wos}"
         f"- 分類：{r['category']}　相關性：{r['relevance']}/5\n"
         f"- 全文：{'已下載 ' + pdf.name if pdf else '未取得（僅依摘要）'}\n\n---\n\n"
     )

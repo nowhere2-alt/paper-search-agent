@@ -2,7 +2,7 @@
 
 設定好研究主題與關鍵字後，它每天會自動完成以下工作：
 
-1. **搜尋**：到你指定的學術資料庫（arXiv、Semantic Scholar、OpenAlex）抓新論文，並把跨資料庫的重複論文合併
+1. **搜尋**：以 **Web of Science** 為主要來源，並可搭配 OpenAlex、Semantic Scholar、arXiv 抓新論文，把跨資料庫的重複論文合併
 2. **分類存檔**：由 Claude 讀標題與摘要，評估相關性（1–5 分），並分到你定義的子資料夾；夠相關的論文會下載開放取用（Open Access）的 PDF
 3. **解析**：Claude 讀完全文 PDF，寫一篇結構化的中文解析文章，最後彙整成「每日論文快報」
 
@@ -11,10 +11,13 @@
 ```
           config.yaml（主題、關鍵字、分類）
                     │
-   ┌────────────────┼────────────────┐
- arXiv      Semantic Scholar      OpenAlex        ← sources/：每個資料庫一個連接器
-   └────────────────┼────────────────┘
-          去重（DOI / arXiv ID / 標題）＋ SQLite 記錄已處理
+   ┌──────────────┬─────┴─────┬──────────────┐
+ Web of Science   OpenAlex  Semantic Scholar  arXiv   ← sources/：每個資料庫一個連接器
+ （主要來源）       （依 sources 順序決定優先權）
+   └──────────────┴─────┬─────┴──────────────┘
+     去重（DOI / arXiv ID / 標題），書目資料以主要來源為準＋ SQLite 記錄已處理
+                    │
+     依 DOI 補齊摘要與開放取用 PDF 連結（WoS 不提供，改向 OpenAlex / Semantic Scholar 查）
                     │
       Claude 分類＋相關性評分（只看摘要，effort=low，便宜）
                     │  相關性 ≥ min_relevance
@@ -49,10 +52,30 @@ git clone <this repo> && cd paper-search-agent
 python -m venv .venv && source .venv/bin/activate   # Windows: .venv\Scripts\activate
 pip install -r requirements.txt
 export ANTHROPIC_API_KEY=sk-ant-...                  # 到 https://console.anthropic.com 申請
+export WOS_API_KEY=...                               # Web of Science Starter API 金鑰，見下方說明
 # 選填（建議）：
 export S2_API_KEY=...          # Semantic Scholar 免費金鑰，避免被限速
 export OPENALEX_EMAIL=you@example.com
 ```
+
+## Web of Science 設定
+
+本專案透過 Clarivate 官方的 **Web of Science Starter API** 取得 WoS 資料。
+
+1. 到 [Clarivate Developer Portal](https://developer.clarivate.com/apis/wos-starter) 註冊，訂閱 Web of Science Starter API。如果學校有訂閱 WoS，可以選機構方案（請先問學校圖書館），額度較高；沒有的話可以先用免費方案試用。
+2. 取得 API 金鑰後設定環境變數 `WOS_API_KEY`。沒有設定時會自動略過 WoS，其他來源照常執行。
+3. 在 `config.yaml` 把 `wos` 放在 `sources` 第一個，它就是主要來源。只想用 WoS 時寫 `sources: [wos]`。
+
+檢索方式：
+
+- 預設檢索式是 `TS=(關鍵字1 OR 關鍵字2 ...) AND PY=(年份範圍)`，依 WoS 收錄日期由新到舊排序。已處理過的論文會被略過，所以每天只會看到新收錄的論文。
+- 用 `wos_filter` 加上額外條件，例如只看特定期刊：`SO=("TOURISM MANAGEMENT" OR "ANNALS OF TOURISM RESEARCH")`。
+- 用 `wos_query` 直接寫完整的 WoS 進階檢索式。建議先在 WoS 網站的進階檢索把檢索式調好，再貼進設定檔。
+- 解析文章開頭會附上 WoS 編號（UT）與 WoS 被引次數。
+
+限制：Starter API 不提供摘要，程式會依 DOI 改向 OpenAlex / Semantic Scholar 補摘要和開放取用 PDF。兩邊都查不到時，Claude 只能用標題和作者關鍵字分類。如果學校有 **Web of Science Expanded API**（含摘要），可以再改寫 `sources/wos.py` 接上。
+
+> 參考專案 [cookjohn/wos-skills](https://github.com/cookjohn/wos-skills) 的做法是透過 Chrome 操作已登入的 WoS 網頁，呼叫網站內部的非公開 API。那種方式適合在 Claude Code 裡手動、互動式查詢，但不適合每天無人值守自動執行：它需要一直開著已登入的瀏覽器，網站改版就會失效，而且大量自動存取可能違反 Clarivate 與學校授權的使用條款，嚴重時可能導致學校的 WoS 存取權被暫停。所以本專案改用官方 API。
 
 ## 使用
 
@@ -82,7 +105,7 @@ export OPENALEX_EMAIL=you@example.com
 
 **方案 B：GitHub Actions（不用開電腦）**
 
-`.github/workflows/daily.yml` 已設定好，每天台灣時間早上 6 點左右執行。到 repo 的 Settings → Secrets and variables → Actions 新增 `ANTHROPIC_API_KEY`（可另加 `S2_API_KEY`、`OPENALEX_EMAIL`）。解析文章與快報會自動 commit 回 repo；PDF 檔案較大，會存成 Actions artifact，保留 30 天。
+`.github/workflows/daily.yml` 已設定好，每天台灣時間早上 6 點左右執行。到 repo 的 Settings → Secrets and variables → Actions 新增 `ANTHROPIC_API_KEY`、`WOS_API_KEY`（可另加 `S2_API_KEY`、`OPENALEX_EMAIL`）。解析文章與快報會自動 commit 回 repo；PDF 檔案較大，會存成 Actions artifact，保留 30 天。
 
 ## 成本控制
 
@@ -101,5 +124,6 @@ export OPENALEX_EMAIL=you@example.com
 ## 注意事項
 
 - Google Scholar 沒有官方 API，且禁止爬蟲，所以不支援。OpenAlex 與 Semantic Scholar 的收錄範圍和它相近。
+- WoS API 有每日請求額度（依方案而定）。每個主題每天大約只需要 1–2 次請求，一般用量不會超過。
 - 請遵守各資料庫的使用條款與速率限制（程式已加入 arXiv 3 秒間隔、Semantic Scholar 429 重試）。
 - AI 解析是為了幫你快速篩選文獻，引用前請回頭核對原文。

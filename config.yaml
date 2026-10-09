@@ -1,4 +1,3 @@
-
 output_dir: library            # 論文、解析文章、每日快報都存在這裡
 lookback_days: 3               # 每次往回搜尋幾天（每天跑時設 2–3 天，避免漏掉延遲上架的論文）
 max_results_per_source: 50     # 每個資料庫每次最多抓幾篇
@@ -21,7 +20,15 @@ topics:
       - ChatGPT hospitality
       - large language model travel
       - AI chatbot hotel
-    sources: [openalex, semantic_scholar, arxiv]   # 可用：arxiv, semantic_scholar, openalex
+    # 順序 = 優先順序：第一個是主要來源，書目資料以它為準；後面的來源補充摘要、PDF 與 WoS 沒收錄的論文
+    # 可用：wos, openalex, semantic_scholar, arxiv（只想用 WoS 就寫 [wos]）
+    sources: [wos, openalex, semantic_scholar]
+    # Web of Science 檢索設定（選填）
+    wos_db: WOS                  # WOS = 核心合集；WOK = 所有資料庫
+    # wos_filter 會以 AND 接在自動產生的檢索式後面，例如只看特定期刊（SO=期刊名稱）：
+    # wos_filter: SO=("TOURISM MANAGEMENT" OR "INTERNATIONAL JOURNAL OF HOSPITALITY MANAGEMENT" OR "ANNALS OF TOURISM RESEARCH")
+    # 或用 wos_query 寫完整的 WoS 進階檢索式（設定後會忽略 keywords 與 wos_filter）：
+    # wos_query: TS=("generative AI" OR ChatGPT) AND SO=("TOURISM MANAGEMENT" OR "ANNALS OF TOURISM RESEARCH") AND PY=(2025-2026)
     min_relevance: 3
     # 分類 = 子資料夾。key 是資料夾名，value 是給 Claude 看的分類說明
     categories:

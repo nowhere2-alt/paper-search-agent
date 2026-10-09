@@ -35,7 +35,9 @@ class Paper:
     @property
     def slug(self) -> str:
         """檔名：年份_第一作者姓氏_標題前幾個字。"""
-        first = self.authors[0].split()[-1] if self.authors else "unknown"
+        name = self.authors[0].strip() if self.authors and self.authors[0].strip() else "unknown"
+        # WoS 格式為「姓, 名」；其他來源為「名 姓」
+        first = name.split(",")[0].strip() if "," in name else name.split()[-1]
         words = re.sub(r"[^A-Za-z0-9 ]", " ", self.title).split()[:6]
         base = f"{self.year or 'nd'}_{first}_{'_'.join(words)}"
         return re.sub(r"[^A-Za-z0-9_\-]", "", base)[:120]
