@@ -15,7 +15,7 @@ from datetime import date
 import requests
 
 from ..journals import Journal
-from ..models import Paper
+from ..models import Paper, SourceUnavailable
 
 log = logging.getLogger(__name__)
 API = "https://api.elsevier.com/content/search/sciencedirect"
@@ -45,11 +45,10 @@ def search(keywords: list[str], since: date, limit: int, cfg: dict,
     if not elsevier:
         return []
     if not key:
-        log.warning("[sciencedirect] 未設定 ELSEVIER_API_KEY，略過 Elsevier 官方搜尋")
-        return []
+        raise SourceUnavailable("未設定 ELSEVIER_API_KEY", journals=elsevier)
     headers = {"X-ELS-APIKey": key, "Accept": "application/json", "Content-Type": "application/json"}
     terms = " OR ".join(f'"{kw}"' for kw in keywords)
-    papers = []
+    papers, failed = [], []
     for j in elsevier:
         body = {
             "tak": terms,  # 搜尋標題、摘要、作者關鍵字
@@ -65,6 +64,7 @@ def search(keywords: list[str], since: date, limit: int, cfg: dict,
             resp.raise_for_status()
         except requests.RequestException as e:
             log.warning("[sciencedirect] %s 查詢失敗：%s", j.name, e)
+            failed.append(j)
             continue
         for r in resp.json().get("results") or []:
             pub = (r.get("publicationDate") or "")[:10]
@@ -72,4 +72,6 @@ def search(keywords: list[str], since: date, limit: int, cfg: dict,
                 continue
             papers.append(_to_paper(r, j))
         time.sleep(0.5)
+    if failed:
+        raise SourceUnavailable(f"{len(failed)} 本期刊查詢失敗", journals=failed, partial=papers)
     return papers

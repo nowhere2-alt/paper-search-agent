@@ -15,7 +15,7 @@ from datetime import date
 
 import requests
 
-from ..models import Paper
+from ..models import Paper, SourceUnavailable
 
 log = logging.getLogger(__name__)
 API = "https://api.clarivate.com/apis/wos-starter/v1/documents"
@@ -68,8 +68,7 @@ def search(keywords: list[str], since: date, limit: int, cfg: dict,
            journals=None) -> list[Paper]:
     key = os.environ.get("WOS_API_KEY")
     if not key:
-        log.warning("[wos] 未設定 WOS_API_KEY，略過 Web of Science")
-        return []
+        raise SourceUnavailable("未設定 WOS_API_KEY")
     query = build_query(keywords, since, cfg, journals)
     log.info("[wos] 檢索式：%s", query)
     papers: list[Paper] = []

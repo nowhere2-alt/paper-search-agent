@@ -9,6 +9,18 @@ journal_list: journals.yaml
 tier_strategy: fallback        # fallback：Tier 1 的高相關論文不夠才搜 Tier 2、Tier 3；all：每次都搜全部 tier
 tier_min_results: 5            # fallback 的門檻：累計幾篇高相關論文（≥ min_relevance）就不再往下一層
 
+# 瀏覽器備援：API 無法使用（沒有金鑰、額度用完、連線失敗）時，由 Claude 操作瀏覽器到資料庫網站搜尋。
+# 需要先安裝：pip install playwright && playwright install chromium
+# 對應關係：wos → Web of Science 網站；sciencedirect → ScienceDirect 網站；
+#           crossref 查不到的期刊 → 依 publisher 到 Taylor & Francis / SAGE / Emerald / Wiley / Springer 網站
+browser:
+  enabled: true
+  headless: true               # 想看 Claude 怎麼操作就改成 false
+  profile_dir: ~/.paper-agent/browser-profile   # 專用瀏覽器設定檔，只在這裡登入要搜尋的資料庫
+  max_steps: 40                # 每個網站最多操作幾輪（每輪約一次 Claude 呼叫），控制花費
+  effort: medium
+  extra_allowed_hosts: []      # 學校 SSO 登入網域，例如 [sso.youruniversity.edu.tw]
+
 claude:
   model: claude-opus-5-5
   language: 繁體中文

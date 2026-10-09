@@ -10,7 +10,8 @@ from .downloader import download_pdf
 from .enrich import enrich
 from .journals import Journal, load_tiers
 from .llm import LLM
-from .models import Paper
+from .browser import browser_fallback
+from .models import Paper, SourceUnavailable
 from .sources import SOURCES
 from .store import Store
 
@@ -20,17 +21,22 @@ log = logging.getLogger(__name__)
 MERGE_FIELDS = ("abstract", "pdf_url", "doi", "arxiv_id", "venue", "published")
 
 
-def collect(topic: dict, since: date, limit: int, journals: list[Journal] | None = None) -> list[Paper]:
+def collect(topic: dict, since: date, limit: int, journals: list[Journal] | None = None,
+            cfg: dict | None = None, use_browser: bool = True) -> list[Paper]:
     """依 sources 的順序抓論文並跨資料庫去重。排越前面的來源是主要來源：
     同一篇論文以主要來源的書目資料為準，缺的欄位（摘要、PDF 連結等）才由後面的來源補上。
-    journals 有值時，各來源只搜尋這些期刊。"""
+    journals 有值時，各來源只搜尋這些期刊。API 無法使用時，改由 Claude 操作瀏覽器到該資料庫網站搜尋。"""
+    cfg = cfg or {}
     found: dict[str, Paper] = {}
     for name in topic.get("sources", list(SOURCES)):
         try:
             papers = SOURCES[name](topic["keywords"], since, limit, topic, journals)
         except Exception as e:  # 單一資料庫掛掉不影響其他來源
-            log.error("[%s] 搜尋失敗：%s", name, e)
-            continue
+            missing = e.journals if isinstance(e, SourceUnavailable) and e.journals else journals
+            papers = list(e.partial) if isinstance(e, SourceUnavailable) else []
+            log.warning("[%s] API 無法使用：%s", name, e)
+            if use_browser:
+                papers += browser_fallback(name, topic["keywords"], missing, since, limit, cfg)
         log.info("[%s] 找到 %d 篇", name, len(papers))
         for p in papers:
             if not p.title:
@@ -81,7 +87,8 @@ def run(cfg: dict, days: int | None = None, dry_run: bool = False) -> list[Path]
         seen_run: set[str] = set()
         for label, tier, journals in search_passes(cfg, topic, root):
             log.info("--- %s ---", label)
-            new = [p for p in collect(topic, since, limit, journals)
+            # dry-run 不呼叫 Claude，所以也不啟動瀏覽器備援
+            new = [p for p in collect(topic, since, limit, journals, cfg, use_browser=not dry_run)
                    if p.uid not in seen_run and not store.seen(p.uid)]
             seen_run.update(p.uid for p in new)
             log.info("新論文 %d 篇", len(new))

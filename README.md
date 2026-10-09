@@ -98,12 +98,52 @@ python -m paper_agent --list-journals
 
 為什麼不直接爬 tandfonline.com、journals.sagepub.com、emerald.com 這些網站？這些出版社都沒有開放的搜尋 API，而且使用條款禁止自動化爬取，網站也有機器人防護。被偵測到時，通常會封鎖整個學校的 IP 存取權。Crossref 的資料是出版社自己登錄的，內容與官網相同，通常在文章上線當天就查得到，是合規又穩定的替代做法。
 
+## 瀏覽器備援（API 無法使用時，由 Claude 操作瀏覽器搜尋）
+
+申請不到 API 金鑰、額度用完或 API 連線失敗時，程式會改用 Claude 的 **browser use** 功能（`browser_toolset_20260801`）：在一個專用的 Chromium 瀏覽器中，由 Claude 看網頁、點選、輸入檢索條件，像人一樣在資料庫網站上搜尋，再把每篇符合的論文回報給程式。之後的補摘要、分類、解析流程都和 API 來源相同。
+
+| 無法使用的 API | 改用的網站 |
+|---|---|
+| Web of Science（沒有 `WOS_API_KEY` 或額度用完） | webofscience.com 進階檢索（需要學校帳號，先手動登入一次） |
+| ScienceDirect（沒有 `ELSEVIER_API_KEY`） | sciencedirect.com（只搜 Elsevier 期刊） |
+| Crossref 查詢失敗、或期刊查不到 ISSN | 依期刊出版社：Taylor & Francis、SAGE、Emerald、Wiley、Springer 的網站 |
+
+### 設定步驟
+
+```bash
+pip install playwright
+playwright install chromium
+python -m paper_agent --browser-login wos     # 開啟瀏覽器，用學校帳號登入 WoS，完成後按 Enter
+```
+
+登入狀態會保存在專用的瀏覽器設定檔（預設 `~/.paper-agent/browser-profile`），和你平常用的瀏覽器分開。如果登入時經過學校的 SSO 網域（例如 `sso.xxx.edu.tw`），請把它加到 `config.yaml` 的 `browser.extra_allowed_hosts`。出版社網站的搜尋不需要登入。
+
+`config.yaml` 的 `browser` 區塊可以設定：
+
+- `enabled`：開關
+- `headless: false`：顯示瀏覽器視窗，看 Claude 怎麼操作
+- `max_steps`：每個網站最多操作幾輪，用來控制花費
+
+### 安全與使用規範
+
+程式和給 Claude 的指示都加了以下限制：
+
+- **只能開啟該資料庫的網域**：其他網址（包含網頁中的連結和網頁自己發出的請求）一律封鎖，防止網頁上的惡意內容把 Claude 引導到別的地方。
+- **不碰帳號與付費**：Claude 不會輸入帳號密碼，不會接受條款、註冊或購買，也不會下載 PDF（瀏覽器的下載功能已關閉）。
+- **遇到阻擋就停**：遇到登入頁、存取被拒、CAPTCHA 或機器人驗證時，Claude 會停下來回報，不會嘗試繞過。程式也沒有加任何規避網站偵測的設定。
+- **用量很低**：每天每個網站只做少量搜尋，只讀取搜尋結果的書目資料。
+- **網頁內容一律視為資料**：網頁上的文字不會被當成指令。
+
+**請注意**：即使用量很低，自動化操作仍可能不符合部分資料庫或出版社的使用條款（例如 Clarivate 與學校的 WoS 授權合約）。建議先向學校圖書館確認，能申請到 API 金鑰時優先使用 API。這個功能只適合在你自己的電腦上執行；GitHub Actions 已預設關閉（`PAPER_AGENT_BROWSER=0`）。
+
+**花費**：瀏覽器搜尋每一步都要呼叫一次 Claude（截圖約 1,000–1,800 tokens），一個網站通常需要 10–40 步，比 API 貴得多。在 fallback 策略下，每個 Tier 都可能各觸發一次。
+
 ## Web of Science 設定
 
 本專案透過 Clarivate 官方的 **Web of Science Starter API** 取得 WoS 資料。
 
 1. 到 [Clarivate Developer Portal](https://developer.clarivate.com/apis/wos-starter) 註冊，訂閱 Web of Science Starter API。如果學校有訂閱 WoS，可以選機構方案（請先問學校圖書館），額度較高；沒有的話可以先用免費方案試用。
-2. 取得 API 金鑰後設定環境變數 `WOS_API_KEY`。沒有設定時會自動略過 WoS，其他來源照常執行。
+2. 取得 API 金鑰後設定環境變數 `WOS_API_KEY`。沒有設定時，若已開啟瀏覽器備援，會改由 Claude 操作瀏覽器到 WoS 網站搜尋；沒開啟就略過 WoS，其他來源照常執行。
 3. 在 `config.yaml` 把 `wos` 放在 `sources` 第一個，它就是主要來源。只想用 WoS 時寫 `sources: [wos]`。
 
 檢索方式：

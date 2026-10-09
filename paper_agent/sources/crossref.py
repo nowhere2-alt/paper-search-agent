@@ -16,7 +16,7 @@ from datetime import date
 import requests
 
 from ..journals import Journal, _mailto
-from ..models import Paper
+from ..models import Paper, SourceUnavailable
 
 log = logging.getLogger(__name__)
 API = "https://api.crossref.org/journals/{issn}/works"
@@ -64,9 +64,10 @@ def search(keywords: list[str], since: date, limit: int, cfg: dict,
            journals: list[Journal] | None = None) -> list[Paper]:
     if not journals:
         return []  # Crossref 只用在期刊清單模式
-    papers = []
+    papers, failed = [], []
     for j in journals:
         if not j.issns:
+            failed.append(j)  # 沒有 ISSN 就無法用 Crossref 查，交給備援
             continue
         params = {
             "filter": f"from-created-date:{since.isoformat()},type:journal-article",
@@ -80,10 +81,13 @@ def search(keywords: list[str], since: date, limit: int, cfg: dict,
             resp.raise_for_status()
         except requests.RequestException as e:
             log.warning("[crossref] %s 查詢失敗：%s", j.name, e)
+            failed.append(j)
             continue
         for item in resp.json().get("message", {}).get("items", []):
             p = _to_paper(item, j)
             if p.title and matches(f"{p.title} {p.abstract}", keywords):
                 papers.append(p)
         time.sleep(0.2)
+    if failed:
+        raise SourceUnavailable(f"{len(failed)} 本期刊無法查詢", journals=failed, partial=papers)
     return papers

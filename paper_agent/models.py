@@ -7,6 +7,15 @@ import re
 from dataclasses import dataclass, field
 
 
+class SourceUnavailable(Exception):
+    """API 來源無法使用（沒有金鑰、額度用完、連線失敗）。journals 是沒搜到的期刊，partial 是已取得的結果。"""
+
+    def __init__(self, reason: str, journals: list | None = None, partial: list | None = None):
+        super().__init__(reason)
+        self.journals = journals
+        self.partial = partial or []
+
+
 @dataclass
 class Paper:
     title: str

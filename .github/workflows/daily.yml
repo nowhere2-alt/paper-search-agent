@@ -27,6 +27,7 @@ jobs:
           CONTACT_EMAIL: ${{ secrets.CONTACT_EMAIL }}
           S2_API_KEY: ${{ secrets.S2_API_KEY }}
           OPENALEX_EMAIL: ${{ secrets.OPENALEX_EMAIL }}
+          PAPER_AGENT_BROWSER: "0"   # 雲端沒有已登入的瀏覽器，關閉瀏覽器備援
       - uses: actions/upload-artifact@v4
         with:
           name: pdfs-${{ github.run_id }}
