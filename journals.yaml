@@ -1,0 +1,70 @@
+# 優先期刊清單：依 Tier 順序搜尋。
+# 預設策略 fallback：先搜 Tier 1，高相關論文不夠時才往 Tier 2、Tier 3 擴大（數量門檻見 config.yaml 的 tier_min_results）。
+#
+# 每本期刊的 ISSN 會在第一次執行時自動從 OpenAlex / Crossref 查詢，並快取在 library/.state/journals.json。
+# 執行 `python -m paper_agent --list-journals` 可以檢查查到的 ISSN；查錯或查不到時，
+# 在該期刊加上 issn: ["xxxx-xxxx", "yyyy-yyyy"] 手動指定即可。
+# publisher 用來決定要不要呼叫出版社的 API（目前支援 Elsevier ScienceDirect），其他出版社透過 Crossref 取得。
+
+tiers:
+  - tier: 1
+    label: Tier 1：觀光餐旅核心 SSCI 期刊
+    journals:
+      - {name: Tourism Management, publisher: Elsevier}
+      - {name: Annals of Tourism Research, publisher: Elsevier}
+      - {name: International Journal of Hospitality Management, publisher: Elsevier}
+      - {name: International Journal of Contemporary Hospitality Management, publisher: Emerald}
+      - {name: Journal of Hospitality Marketing & Management, publisher: Taylor & Francis}
+      - {name: Journal of Travel & Tourism Marketing, publisher: Taylor & Francis}
+      - {name: Tourism Review, publisher: Emerald}
+      - {name: Journal of Hospitality and Tourism Management, publisher: Elsevier}
+      - {name: Journal of Sustainable Tourism, publisher: Taylor & Francis}
+      - {name: Journal of Destination Marketing & Management, publisher: Elsevier}
+
+  - tier: 2
+    label: Tier 2：相關觀光餐旅期刊
+    journals:
+      - {name: Current Issues in Tourism, publisher: Taylor & Francis}
+      - {name: Tourism Economics, publisher: SAGE}
+      - {name: Journal of Travel Research, publisher: SAGE}
+      - {name: Cornell Hospitality Quarterly, publisher: SAGE}
+      - {name: International Journal of Tourism Research, publisher: Wiley}
+      - {name: Journal of Hospitality & Tourism Research, publisher: SAGE}
+      - {name: Journal of Hospitality and Tourism Technology, publisher: Emerald}
+      - {name: Asia Pacific Journal of Tourism Research, publisher: Taylor & Francis}
+      - {name: Tourism Geographies, publisher: Taylor & Francis}
+      - {name: Scandinavian Journal of Hospitality and Tourism, publisher: Taylor & Francis}
+      - {name: Information Technology & Tourism, publisher: Springer}
+      - {name: Tourism Management Perspectives, publisher: Elsevier}
+      - {name: Journal of Vacation Marketing, publisher: SAGE}
+      - {name: Journal of Outdoor Recreation and Tourism, publisher: Elsevier}
+      - {name: "Journal of Hospitality, Leisure, Sport & Tourism Education", publisher: Elsevier}
+      - {name: Journal of Tourism and Cultural Change, publisher: Taylor & Francis}
+      - {name: Leisure Studies, publisher: Taylor & Francis}
+      - {name: Tourist Studies, publisher: SAGE}
+      - {name: Journal of Leisure Research, publisher: Taylor & Francis}
+      - {name: Measurement in Physical Education and Exercise Science, publisher: Taylor & Francis}
+      - {name: Leisure Sciences, publisher: Taylor & Francis}
+
+  - tier: 3
+    label: Tier 3：相關學科（備援）
+    journals:
+      # Marketing
+      - {name: Journal of Marketing, publisher: SAGE, field: Marketing}
+      - {name: Journal of Consumer Research, publisher: Oxford University Press, field: Marketing}
+      - {name: Journal of the Academy of Marketing Science, publisher: Springer, field: Marketing}
+      - {name: Journal of Business Research, publisher: Elsevier, field: Marketing}
+      # Management
+      - {name: Academy of Management Journal, publisher: Academy of Management, field: Management}
+      - {name: Strategic Management Journal, publisher: Wiley, field: Management}
+      - {name: Journal of Management, publisher: SAGE, field: Management}
+      # Psychology
+      - {name: Journal of Applied Psychology, publisher: APA, field: Psychology}
+      - {name: Organizational Behavior and Human Decision Processes, publisher: Elsevier, field: Psychology}
+      # Information Systems
+      - {name: MIS Quarterly, publisher: MIS Research Center, field: Information Systems}
+      - {name: Information Systems Research, publisher: INFORMS, field: Information Systems}
+      - {name: Journal of the Association for Information Systems, publisher: AIS, field: Information Systems}
+      # Consumer Behavior
+      - {name: Journal of Consumer Psychology, publisher: Wiley, field: Consumer Behavior}
+      - {name: Psychology & Marketing, publisher: Wiley, field: Consumer Behavior}

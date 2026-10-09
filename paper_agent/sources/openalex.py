@@ -22,14 +22,21 @@ def _abstract(inverted: dict | None) -> str:
     return " ".join(pos[i] for i in sorted(pos))
 
 
-def search(keywords: list[str], since: date, limit: int, cfg: dict) -> list[Paper]:
+def search(keywords: list[str], since: date, limit: int, cfg: dict,
+           journals=None) -> list[Paper]:
+    filters = f"from_publication_date:{since.isoformat()}"
+    if journals:
+        issns = [i for j in journals for i in j.issns]
+        if not issns:
+            return []
+        filters += ",primary_location.source.issn:" + "|".join(issns[:100])
     params = {
         "search": " OR ".join(f'"{kw}"' for kw in keywords),
-        "filter": f"from_publication_date:{since.isoformat()}",
+        "filter": filters,
         "sort": "publication_date:desc",
         "per-page": min(limit, 200),
     }
-    if email := os.environ.get("OPENALEX_EMAIL"):
+    if email := os.environ.get("CONTACT_EMAIL") or os.environ.get("OPENALEX_EMAIL"):
         params["mailto"] = email
     resp = requests.get(API, params=params, timeout=60)
     resp.raise_for_status()

@@ -1,5 +1,5 @@
 # 每天自動執行一次，把解析文章與每日快報 commit 回 repo（PDF 太大不進 git，改存成 Actions artifact）。
-# 需先到 GitHub repo → Settings → Secrets and variables → Actions 新增 ANTHROPIC_API_KEY 與 WOS_API_KEY。
+# 需先到 GitHub repo → Settings → Secrets and variables → Actions 新增 ANTHROPIC_API_KEY、WOS_API_KEY（選填 ELSEVIER_API_KEY、CONTACT_EMAIL）。
 name: daily-papers
 
 on:
@@ -23,6 +23,8 @@ jobs:
         env:
           ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
           WOS_API_KEY: ${{ secrets.WOS_API_KEY }}
+          ELSEVIER_API_KEY: ${{ secrets.ELSEVIER_API_KEY }}
+          CONTACT_EMAIL: ${{ secrets.CONTACT_EMAIL }}
           S2_API_KEY: ${{ secrets.S2_API_KEY }}
           OPENALEX_EMAIL: ${{ secrets.OPENALEX_EMAIL }}
       - uses: actions/upload-artifact@v4

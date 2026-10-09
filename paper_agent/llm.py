@@ -129,7 +129,8 @@ tldr：用{self.language}寫一句話（50 字內）說明這篇論文做了什�
     # ---------- 3. 每日總覽 ----------
     def daily_overview(self, topic: dict, items: list[dict]) -> str | None:
         listing = "\n".join(
-            f"- [{it['category']}] {it['title']}（相關性 {it['relevance']}）：{it['tldr']}"
+            f"- [{it['category']}] {it['title']}（{it.get('venue', '')}；{it.get('tier_label', '')}；"
+            f"相關性 {it['relevance']}）：{it['tldr']}"
             for it in items
         )
         system = f"你是研究助理，負責撰寫每日文獻快報。用{self.language}撰寫，簡潔、具洞察力。"

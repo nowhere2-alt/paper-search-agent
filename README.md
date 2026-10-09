@@ -2,30 +2,31 @@
 
 設定好研究主題與關鍵字後，它每天會自動完成以下工作：
 
-1. **搜尋**：以 **Web of Science** 為主要來源，並可搭配 OpenAlex、Semantic Scholar、arXiv 抓新論文，把跨資料庫的重複論文合併
+1. **搜尋**：以你的**優先期刊清單**（`journals.yaml`，分 Tier 1–3）為搜尋範圍，從 **Web of Science**、Elsevier ScienceDirect、Crossref（各出版社登錄的最新文章）、OpenAlex、Semantic Scholar 抓新論文，並把跨資料庫的重複論文合併
 2. **分類存檔**：由 Claude 讀標題與摘要，評估相關性（1–5 分），並分到你定義的子資料夾；夠相關的論文會下載開放取用（Open Access）的 PDF
 3. **解析**：Claude 讀完全文 PDF，寫一篇結構化的中文解析文章，最後彙整成「每日論文快報」
 
 ## 架構
 
 ```
-          config.yaml（主題、關鍵字、分類）
+     config.yaml（主題、關鍵字、分類）＋ journals.yaml（Tier 1–3 優先期刊）
                     │
-   ┌──────────────┬─────┴─────┬──────────────┐
- Web of Science   OpenAlex  Semantic Scholar  arXiv   ← sources/：每個資料庫一個連接器
- （主要來源）       （依 sources 順序決定優先權）
-   └──────────────┴─────┬─────┴──────────────┘
-     去重（DOI / arXiv ID / 標題），書目資料以主要來源為準＋ SQLite 記錄已處理
-                    │
-     依 DOI 補齊摘要與開放取用 PDF 連結（WoS 不提供，改向 OpenAlex / Semantic Scholar 查）
-                    │
-      Claude 分類＋相關性評分（只看摘要，effort=low，便宜）
-                    │  相關性 ≥ min_relevance
+      ┌──── 依 Tier 逐層搜尋（fallback：高相關論文不夠才搜下一層）────┐
+      │                                                              │
+      │  Web of Science   ScienceDirect   Crossref   OpenAlex   S2    │ ← sources/
+      │  SO=期刊名        Elsevier 期刊    逐本 ISSN   ISSN 篩選  venue │
+      │  （主要來源，依 sources 順序決定優先權）                        │
+      │                                                              │
+      │  去重（DOI / 標題），書目資料以主要來源為準                       │
+      │  依 DOI 補齊摘要與開放取用 PDF（OpenAlex / Semantic Scholar）     │
+      │  Claude 分類＋相關性評分（只看摘要，effort=low，便宜）            │
+      └──────────────────────────────────────────────────────────────┘
+                    │  相關性 ≥ min_relevance，依 Tier → 相關性排序
           下載 PDF → library/<主題>/<分類>/
                     │
       Claude 讀全文 PDF 寫解析文章（effort=high）→ 同資料夾 .md
                     │
-      Claude 寫「今日研究動態」→ library/digests/<日期>_<主題>.md
+      Claude 寫「今日研究動態」→ library/digests/<日期>_<主題>.md（依 Tier 分段）
 ```
 
 這是一個**固定流程的 workflow**，不是讓 AI 自由決定下一步的開放式 agent。每天的工作步驟固定，用程式控制流程比較可靠，也比較容易控制成本；Claude 只負責需要判斷與閱讀理解的步驟。
@@ -54,9 +55,48 @@ pip install -r requirements.txt
 export ANTHROPIC_API_KEY=sk-ant-...                  # 到 https://console.anthropic.com 申請
 export WOS_API_KEY=...                               # Web of Science Starter API 金鑰，見下方說明
 # 選填（建議）：
+export ELSEVIER_API_KEY=...    # Elsevier ScienceDirect API 金鑰（https://dev.elsevier.com，學術用途免費）
 export S2_API_KEY=...          # Semantic Scholar 免費金鑰，避免被限速
-export OPENALEX_EMAIL=you@example.com
+export CONTACT_EMAIL=you@example.com   # Crossref / OpenAlex 的 polite pool，速度較快較穩定
 ```
+
+## 優先期刊清單（journals.yaml）
+
+`journals.yaml` 是你的期刊清單，分成三層：
+
+- **Tier 1**：觀光餐旅核心 SSCI 期刊，永遠最先搜尋
+- **Tier 2**：相關觀光餐旅期刊
+- **Tier 3**：行銷、管理、心理、資管等相關學科（備援）
+
+搜尋策略在 `config.yaml` 設定：
+
+| 設定 | 說明 |
+|---|---|
+| `tier_strategy: fallback`（預設） | 先搜 Tier 1，累計的高相關論文少於 `tier_min_results` 篇時才搜 Tier 2，仍不夠再搜 Tier 3 |
+| `tier_strategy: all` | 每次都搜全部 Tier，快報依 Tier 分段 |
+| `tiers: [1, 2]`（主題層級） | 只搜指定的 Tier |
+| `open_search: true`（主題層級） | 期刊清單搜完後，再做一次不限期刊的搜尋 |
+| `use_journal_list: false`（主題層級） | 不使用期刊清單，搜尋所有論文 |
+
+深度解析的名額（`max_analyses_per_topic`）會優先給 Tier 1，同一層再依相關性排序。
+
+每本期刊的 ISSN 會在第一次執行時自動向 OpenAlex / Crossref 查詢，並快取起來。建議先執行一次：
+
+```bash
+python -m paper_agent --list-journals
+```
+
+檢查每本期刊查到的 ISSN。顯示「找不到 ISSN」或查錯的期刊，在 `journals.yaml` 該行加上 `issn: ["xxxx-xxxx", "yyyy-yyyy"]` 手動指定。新增或刪除期刊，直接編輯 `journals.yaml` 即可。
+
+### 各出版社的資料怎麼取得
+
+| 出版社 | 取得方式 |
+|---|---|
+| Elsevier（ScienceDirect） | **Elsevier 官方 ScienceDirect Search API**（需 `ELSEVIER_API_KEY`），在標題、摘要、關鍵字中搜尋 |
+| Taylor & Francis、SAGE、Emerald、Wiley、Springer 等 | **Crossref**：出版社會把每篇新文章的書目資料直接登錄到 Crossref，程式依 ISSN 逐本期刊抓新文章，再用關鍵字篩選 |
+| 所有期刊 | Web of Science（`SO=` 期刊名稱）、OpenAlex（ISSN 篩選）、Semantic Scholar（venue 篩選） |
+
+為什麼不直接爬 tandfonline.com、journals.sagepub.com、emerald.com 這些網站？這些出版社都沒有開放的搜尋 API，而且使用條款禁止自動化爬取，網站也有機器人防護。被偵測到時，通常會封鎖整個學校的 IP 存取權。Crossref 的資料是出版社自己登錄的，內容與官網相同，通常在文章上線當天就查得到，是合規又穩定的替代做法。
 
 ## Web of Science 設定
 
@@ -69,7 +109,8 @@ export OPENALEX_EMAIL=you@example.com
 檢索方式：
 
 - 預設檢索式是 `TS=(關鍵字1 OR 關鍵字2 ...) AND PY=(年份範圍)`，依 WoS 收錄日期由新到舊排序。已處理過的論文會被略過，所以每天只會看到新收錄的論文。
-- 用 `wos_filter` 加上額外條件，例如只看特定期刊：`SO=("TOURISM MANAGEMENT" OR "ANNALS OF TOURISM RESEARCH")`。
+- 使用期刊清單時，會自動加上 `SO=(該 Tier 的期刊名稱)`。
+- 用 `wos_filter` 加上額外條件（以 AND 連接）。
 - 用 `wos_query` 直接寫完整的 WoS 進階檢索式。建議先在 WoS 網站的進階檢索把檢索式調好，再貼進設定檔。
 - 解析文章開頭會附上 WoS 編號（UT）與 WoS 被引次數。
 
@@ -79,7 +120,7 @@ export OPENALEX_EMAIL=you@example.com
 
 ## 使用
 
-1. 編輯 `config.yaml`：填入主題名稱、說明、關鍵字、要用的資料庫，以及分類資料夾。分類的說明寫得越具體，Claude 分得越準。
+1. 編輯 `config.yaml`：填入主題名稱、說明、關鍵字、要用的資料庫，以及分類資料夾。分類的說明寫得越具體，Claude 分得越準。必要時也調整 `journals.yaml`，並用 `--list-journals` 檢查 ISSN。
 2. 先試跑，只搜尋、不花 API 費用：
    ```bash
    python -m paper_agent --dry-run --days 14
@@ -105,7 +146,7 @@ export OPENALEX_EMAIL=you@example.com
 
 **方案 B：GitHub Actions（不用開電腦）**
 
-`.github/workflows/daily.yml` 已設定好，每天台灣時間早上 6 點左右執行。到 repo 的 Settings → Secrets and variables → Actions 新增 `ANTHROPIC_API_KEY`、`WOS_API_KEY`（可另加 `S2_API_KEY`、`OPENALEX_EMAIL`）。解析文章與快報會自動 commit 回 repo；PDF 檔案較大，會存成 Actions artifact，保留 30 天。
+`.github/workflows/daily.yml` 已設定好，每天台灣時間早上 6 點左右執行。到 repo 的 Settings → Secrets and variables → Actions 新增 `ANTHROPIC_API_KEY`、`WOS_API_KEY`（可另加 `ELSEVIER_API_KEY`、`S2_API_KEY`、`CONTACT_EMAIL`）。解析文章與快報會自動 commit 回 repo；PDF 檔案較大，會存成 Actions artifact，保留 30 天。
 
 ## 成本控制
 
@@ -116,7 +157,7 @@ export OPENALEX_EMAIL=you@example.com
 
 ## 擴充
 
-- **新增資料庫**：在 `paper_agent/sources/` 新增一個檔案，實作 `search(keywords, since, limit, cfg) -> list[Paper]`，再登記到 `sources/__init__.py` 的 `SOURCES`。PubMed（E-utilities）、CrossRef、IEEE Xplore 和 Scopus（需機構 API 金鑰）都可以用這個方式接上。
+- **新增資料庫**：在 `paper_agent/sources/` 新增一個檔案，實作 `search(keywords, since, limit, cfg, journals=None) -> list[Paper]`（`journals` 有值時只搜這些期刊），再登記到 `sources/__init__.py` 的 `SOURCES`。Scopus（Elsevier，同一把金鑰）、Springer Nature Meta API、PubMed 都可以用這個方式接上。
 - **付費牆論文**：程式只下載開放取用的 PDF。拿不到全文時會改用摘要分析，並在文章開頭註明。若學校有 VPN 或 proxy，可以在 `downloader.py` 加上機構認證。
 - **推播**：在 `pipeline.run()` 最後把快報寄到 Email、LINE Notify、Slack 或 Notion。
 - **調整解析格式**：修改 `paper_agent/llm.py` 裡 `analyze()` 的段落要求，例如加入「理論基礎」或「量表題項」等段落。
@@ -125,5 +166,6 @@ export OPENALEX_EMAIL=you@example.com
 
 - Google Scholar 沒有官方 API，且禁止爬蟲，所以不支援。OpenAlex 與 Semantic Scholar 的收錄範圍和它相近。
 - WoS API 有每日請求額度（依方案而定）。每個主題每天大約只需要 1–2 次請求，一般用量不會超過。
-- 請遵守各資料庫的使用條款與速率限制（程式已加入 arXiv 3 秒間隔、Semantic Scholar 429 重試）。
+- 請遵守各資料庫的使用條款與速率限制（程式已加入 arXiv 3 秒間隔、Semantic Scholar 與 WoS 429 重試、Crossref 與 ScienceDirect 逐本查詢間隔）。
+- Crossref 只能用標題和摘要比對關鍵字，Elsevier 不提供摘要給 Crossref，所以 Elsevier 期刊建議設定 `ELSEVIER_API_KEY`。WoS 的 TS 欄位也會比對摘要，可以互補。
 - AI 解析是為了幫你快速篩選文獻，引用前請回頭核對原文。

@@ -37,6 +37,7 @@ class Store:
     def save(self, topic: str, paper: Paper, category: str, relevance: int, tldr: str,
              pdf_path: str | None, analysis_path: str | None) -> None:
         meta = {k: getattr(paper, k) for k in ("url", "authors", "year", "venue", "source", "doi")}
+        meta["tier"] = paper.extra.get("tier")
         self.db.execute(
             "INSERT OR REPLACE INTO papers VALUES (?,?,?,?,?,?,?,?,?,?)",
             (paper.uid, topic, paper.title, category, relevance, tldr, pdf_path,

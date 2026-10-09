@@ -16,7 +16,8 @@ API = "https://api.semanticscholar.org/graph/v1/paper/search/bulk"
 FIELDS = "title,abstract,authors,year,externalIds,url,openAccessPdf,publicationDate,venue"
 
 
-def search(keywords: list[str], since: date, limit: int, cfg: dict) -> list[Paper]:
+def search(keywords: list[str], since: date, limit: int, cfg: dict,
+           journals=None) -> list[Paper]:
     headers = {}
     if key := os.environ.get("S2_API_KEY"):
         headers["x-api-key"] = key
@@ -27,6 +28,8 @@ def search(keywords: list[str], since: date, limit: int, cfg: dict) -> list[Pape
         "publicationDateOrYear": f"{since.isoformat()}:",
         "sort": "publicationDate:desc",
     }
+    if journals:
+        params["venue"] = ",".join(j.name for j in journals)
     for attempt in range(4):
         resp = requests.get(API, params=params, headers=headers, timeout=60)
         if resp.status_code != 429:

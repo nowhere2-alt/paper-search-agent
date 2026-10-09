@@ -23,7 +23,10 @@ def _query(keywords: list[str]) -> str:
     return " OR ".join(parts)
 
 
-def search(keywords: list[str], since: date, limit: int, cfg: dict) -> list[Paper]:
+def search(keywords: list[str], since: date, limit: int, cfg: dict,
+           journals=None) -> list[Paper]:
+    if journals:
+        return []  # arXiv 是預印本，不屬於任何期刊
     params = {
         "search_query": _query(keywords),
         "sortBy": "submittedDate",

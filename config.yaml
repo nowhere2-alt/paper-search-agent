@@ -4,6 +4,11 @@ max_results_per_source: 50     # 每個資料庫每次最多抓幾篇
 min_relevance: 3               # 相關性 1–5，低於此分數的只記錄、不下載不解析
 max_analyses_per_topic: 10     # 每個主題每天最多深度解析幾篇（控制 API 花費）
 
+# 優先期刊清單（見 journals.yaml）
+journal_list: journals.yaml
+tier_strategy: fallback        # fallback：Tier 1 的高相關論文不夠才搜 Tier 2、Tier 3；all：每次都搜全部 tier
+tier_min_results: 5            # fallback 的門檻：累計幾篇高相關論文（≥ min_relevance）就不再往下一層
+
 claude:
   model: claude-opus-5-5
   language: 繁體中文
@@ -20,9 +25,14 @@ topics:
       - ChatGPT hospitality
       - large language model travel
       - AI chatbot hotel
-    # 順序 = 優先順序：第一個是主要來源，書目資料以它為準；後面的來源補充摘要、PDF 與 WoS 沒收錄的論文
-    # 可用：wos, openalex, semantic_scholar, arxiv（只想用 WoS 就寫 [wos]）
-    sources: [wos, openalex, semantic_scholar]
+    # 是否以 journals.yaml 的期刊清單為搜尋範圍（false = 不限期刊，搜尋所有論文）
+    use_journal_list: true
+    # tiers: [1, 2]            # 只搜指定的 tier（預設全部，依 tier_strategy 逐層）
+    open_search: false         # true = 期刊清單搜完後，再做一次不限期刊的搜尋
+    # 順序 = 優先順序：第一個是主要來源，書目資料以它為準；後面的來源補充摘要、PDF 與漏掉的論文
+    # 可用：wos（Web of Science）、sciencedirect（Elsevier 官方 API）、crossref（各出版社登錄的資料）、
+    #       openalex、semantic_scholar、arxiv（arXiv 只在不限期刊時使用）
+    sources: [wos, sciencedirect, crossref, openalex, semantic_scholar]
     # Web of Science 檢索設定（選填）
     wos_db: WOS                  # WOS = 核心合集；WOK = 所有資料庫
     # wos_filter 會以 AND 接在自動產生的檢索式後面，例如只看特定期刊（SO=期刊名稱）：

@@ -22,13 +22,16 @@ API = "https://api.clarivate.com/apis/wos-starter/v1/documents"
 PAGE_SIZE = 50  # API 單頁上限
 
 
-def build_query(keywords: list[str], since: date, topic: dict) -> str:
+def build_query(keywords: list[str], since: date, topic: dict, journals=None) -> str:
     """預設：TS=（主題欄位：標題、摘要、關鍵字）任一關鍵字命中，並限制出版年。
     進階：在 config 用 wos_query 寫完整的 WoS 進階檢索式（可用 SO=期刊、WC=學科類別等欄位）。"""
     if custom := topic.get("wos_query"):
         return custom
     terms = " OR ".join(f'"{kw}"' if " " in kw else kw for kw in keywords)
     query = f"TS=({terms}) AND PY=({since.year}-{date.today().year})"
+    if journals:
+        names = " OR ".join(f'"{j.name.upper()}"' for j in journals)
+        query += f" AND SO=({names})"
     if extra := topic.get("wos_filter"):
         query += f" AND {extra}"
     return query
@@ -61,12 +64,13 @@ def _to_paper(hit: dict) -> Paper:
     )
 
 
-def search(keywords: list[str], since: date, limit: int, cfg: dict) -> list[Paper]:
+def search(keywords: list[str], since: date, limit: int, cfg: dict,
+           journals=None) -> list[Paper]:
     key = os.environ.get("WOS_API_KEY")
     if not key:
         log.warning("[wos] 未設定 WOS_API_KEY，略過 Web of Science")
         return []
-    query = build_query(keywords, since, cfg)
+    query = build_query(keywords, since, cfg, journals)
     log.info("[wos] 檢索式：%s", query)
     papers: list[Paper] = []
     for page in range(1, math.ceil(limit / PAGE_SIZE) + 1):

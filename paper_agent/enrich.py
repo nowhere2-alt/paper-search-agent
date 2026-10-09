@@ -14,7 +14,8 @@ log = logging.getLogger(__name__)
 
 
 def _from_openalex(doi: str) -> tuple[str, str | None]:
-    params = {"mailto": os.environ["OPENALEX_EMAIL"]} if os.environ.get("OPENALEX_EMAIL") else {}
+    email = os.environ.get("CONTACT_EMAIL") or os.environ.get("OPENALEX_EMAIL")
+    params = {"mailto": email} if email else {}
     resp = requests.get(f"https://api.openalex.org/works/doi:{doi}", params=params, timeout=30)
     if resp.status_code == 404:
         return "", None
