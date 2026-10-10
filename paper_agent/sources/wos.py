@@ -22,7 +22,19 @@ API = "https://api.clarivate.com/apis/wos-starter/v1/documents"
 PAGE_SIZE = 50  # API 單頁上限
 
 
-def build_query(keywords: list[str], since: date, topic: dict, journals=None) -> str:
+def journal_filter(journals, use_issn: bool = True) -> str:
+    """期刊範圍：有 ISSN 的用 IS=（不受期刊名稱寫法差異影響），沒有的才用 SO=期刊名稱。"""
+    with_issn = [j for j in journals if j.issns] if use_issn else []
+    parts = []
+    if with_issn:
+        parts.append("IS=(" + " OR ".join(i for j in with_issn for i in j.issns) + ")")
+    names = [j for j in journals if j not in with_issn]
+    if names:
+        parts.append("SO=(" + " OR ".join(f'"{j.name.upper()}"' for j in names) + ")")
+    return parts[0] if len(parts) == 1 else "(" + " OR ".join(parts) + ")"
+
+
+def build_query(keywords: list[str], since: date, topic: dict, journals=None, use_issn: bool = True) -> str:
     """預設：TS=（主題欄位：標題、摘要、關鍵字）任一關鍵字命中，並限制出版年。
     進階：在 config 用 wos_query 寫完整的 WoS 進階檢索式（可用 SO=期刊、WC=學科類別等欄位）。"""
     if custom := topic.get("wos_query"):
@@ -30,8 +42,7 @@ def build_query(keywords: list[str], since: date, topic: dict, journals=None) ->
     terms = " OR ".join(f'"{kw}"' if " " in kw else kw for kw in keywords)
     query = f"TS=({terms}) AND PY=({since.year}-{date.today().year})"
     if journals:
-        names = " OR ".join(f'"{j.name.upper()}"' for j in journals)
-        query += f" AND SO=({names})"
+        query += f" AND {journal_filter(journals, use_issn)}"
     if extra := topic.get("wos_filter"):
         query += f" AND {extra}"
     return query
@@ -70,6 +81,17 @@ def search(keywords: list[str], since: date, limit: int, cfg: dict,
     if not key:
         raise SourceUnavailable("未設定 WOS_API_KEY")
     query = build_query(keywords, since, cfg, journals)
+    try:
+        return _fetch(query, key, limit, cfg)
+    except requests.HTTPError as e:
+        # Starter API 若不支援 IS=（ISSN）欄位會回 400，改用期刊名稱再查一次
+        if journals and e.response is not None and e.response.status_code == 400 and "IS=(" in query:
+            log.warning("[wos] 不接受 ISSN 檢索（IS=），改用期刊名稱（SO=）")
+            return _fetch(build_query(keywords, since, cfg, journals, use_issn=False), key, limit, cfg)
+        raise
+
+
+def _fetch(query: str, key: str, limit: int, cfg: dict) -> list[Paper]:
     log.info("[wos] 檢索式：%s", query)
     papers: list[Paper] = []
     for page in range(1, math.ceil(limit / PAGE_SIZE) + 1):

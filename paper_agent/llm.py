@@ -41,13 +41,38 @@ def make_llm(cfg: dict):
     return LLM(cfg.get("claude", {}))
 
 
+def page_marker(citations) -> str:
+    """把 PDF 引用轉成頁碼標記，例如 [p.5] 或 [p.5–6, 9]。end_page_number 不含（exclusive）。"""
+    spans = []
+    for c in citations or []:
+        start, end = getattr(c, "start_page_number", None), getattr(c, "end_page_number", None)
+        if start is None:
+            continue
+        last = max(start, (end or start + 1) - 1)
+        span = f"{start}" if last == start else f"{start}–{last}"
+        if span not in spans:
+            spans.append(span)
+    return f" [p.{', '.join(spans)}]" if spans else ""
+
+
 def _text(msg) -> str | None:
     if msg.stop_reason == "refusal":
         log.warning("Claude 拒絕處理此請求：%s", msg.stop_details)
         return None
     if msg.stop_reason == "max_tokens":
         log.warning("輸出達到 max_tokens 上限，內容可能被截斷")
-    return "".join(b.text for b in msg.content if b.type == "text")
+    # 開啟引用時，回覆會被切成多個 text 區塊，有引用的區塊帶 citations；在該段文字後面加上頁碼
+    parts = []
+    for b in msg.content:
+        if b.type != "text":
+            continue
+        marker = page_marker(getattr(b, "citations", None))
+        text = b.text
+        if marker:
+            stripped = text.rstrip()
+            text = stripped + marker + text[len(stripped):]
+        parts.append(text)
+    return "".join(parts)
 
 
 class LLM:
@@ -74,8 +99,10 @@ class LLM:
             data = base64.standard_b64encode(pdf_path.read_bytes()).decode()
             content.append({"type": "document",
                             "source": {"type": "base64", "media_type": "application/pdf", "data": data},
-                            "title": paper.title})
-            basis = "以下附上論文全文 PDF。"
+                            "title": paper.title,
+                            # 引用功能：解析中的每個論點附上原文頁碼，方便核對、降低杜撰
+                            "citations": {"enabled": True}})
+            basis = "以下附上論文全文 PDF。引用關鍵數據與發現時，請以原文為依據。"
         else:
             basis = prompts.ABSTRACT_ONLY
         system, prompt = prompts.analyze(paper, topic, self.language, basis)
@@ -98,6 +125,15 @@ class LLM:
 
     def analyze(self, paper: Paper, topic: dict, pdf_path: Path | None) -> str | None:
         return self._call(self._analyze_params(paper, topic, pdf_path))
+
+    def expand_keywords(self, topic: dict) -> list[str]:
+        system, prompt, schema = prompts.expand_keywords(topic)
+        text = self._call({"model": self.classify_model, "max_tokens": 4000, "system": system,
+                           "messages": [{"role": "user", "content": prompt}],
+                           "output_config": {"effort": "low", "format": {"type": "json_schema", "schema": schema}}})
+        if not text:
+            raise RuntimeError("Claude 拒絕或沒有回應")
+        return json.loads(text)["keywords"]
 
     def daily_overview(self, topic: dict, items: list[dict]) -> str | None:
         system, prompt = prompts.overview(topic, items, self.language)

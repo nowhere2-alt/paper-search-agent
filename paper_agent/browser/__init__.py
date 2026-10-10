@@ -41,7 +41,8 @@ def _site_searcher(cfg: dict, keywords: list[str], since: date, limit: int):
 
 
 def browser_fallback(source: str, keywords: list[str], journals: list[Journal] | None,
-                     since: date, limit: int, cfg: dict, allow_browser: bool = True) -> list[Paper]:
+                     since: date, limit: int, cfg: dict, allow_browser: bool = True,
+                     notes: list[str] | None = None) -> list[Paper]:
     """依失敗的 API 來源決定要搜哪些網站；不適用時回傳空清單。
     allow_browser=False（dry-run）時不啟動瀏覽器，只讀 RSS。"""
     target = FALLBACK_FOR.get(source)
@@ -58,20 +59,30 @@ def browser_fallback(source: str, keywords: list[str], journals: list[Journal] |
         groups = {target: journals}
 
     search_site = _site_searcher(cfg, keywords, since, limit) if allow_browser else None
+    notes = [] if notes is None else notes
+
+    def note(text: str) -> None:
+        if text not in notes:
+            notes.append(text)
+
     papers: list[Paper] = []
     for site_key, js in groups.items():
         if not js:
             continue
+        label = SITES[site_key]["label"] if site_key in SITES else "無對應網站的期刊"
         done = False
         if search_site and site_key != NO_SITE:
             try:
                 result = search_site(site_key, js)
                 papers += result.papers
                 done = not result.blocked
+                note(f"瀏覽器（{label}）：{'被網站擋下，改讀 RSS' if result.blocked else f'找到 {len(result.papers)} 篇'}")
             except Exception as e:  # 瀏覽器啟動失敗、網站錯誤等，不影響其他來源
                 log.error("[browser:%s] 瀏覽器搜尋失敗：%s: %s", site_key, type(e).__name__, e)
+                note(f"瀏覽器（{label}）：啟動或搜尋失敗，改讀 RSS")
         if not done:
             found = rss.search(keywords, since, limit, cfg, js)
             log.info("[rss] 以期刊 RSS 補抓 %s：%d 篇", site_key, len(found))
+            note(f"期刊 RSS（{label}）：{len(found)} 篇")
             papers += found
     return papers

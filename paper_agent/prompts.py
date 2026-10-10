@@ -53,8 +53,13 @@ tldr：用{language}寫一句話（50 字內）說明這篇論文做了什麼、
     return system, prompt, schema
 
 
-def analyze(paper: Paper, topic: dict, language: str, basis: str) -> tuple[str, str]:
-    """basis 說明全文的提供方式（附 PDF、附擷取文字、或僅有摘要）。"""
+PAGE_HINT = ("全文中以 [第 N 頁] 標示頁碼。引用關鍵數據、研究發現或論點時，在該句句末標註出處頁碼，"
+             "例如 [p.5] 或 [p.5–6]；找不到出處的內容不要寫。")
+
+
+def analyze(paper: Paper, topic: dict, language: str, basis: str, page_hint: bool = False) -> tuple[str, str]:
+    """basis 說明全文的提供方式（附 PDF、附擷取文字、或僅有摘要）。
+    page_hint：全文是附頁碼標記的純文字時，要求在句末標註頁碼（Claude 版用 citations 功能，不需要）。"""
     system = (
         f"你是一位資深研究者，負責為研究團隊撰寫論文解析文章。請用{language}撰寫，"
         "專有名詞保留英文原文。內容須忠於論文，不要杜撰論文沒有的數據；"
@@ -72,6 +77,8 @@ def analyze(paper: Paper, topic: dict, language: str, basis: str) -> tuple[str, 
 
 請寫一篇 Markdown 格式的論文解析文章，包含以下段落：
 {SECTIONS}"""
+    if page_hint:
+        prompt += "\n\n" + PAGE_HINT
     return system, prompt
 
 
@@ -89,3 +96,27 @@ def overview(topic: dict, items: list[dict], language: str) -> tuple[str, str]:
 請寫 3–6 段的「今日研究動態」：歸納這批論文的共同趨勢、值得注意的新方法或反直覺發現，
 以及建議我優先精讀哪幾篇、為什麼。不要逐篇重述，直接輸出 Markdown 內文（不需要大標題）。"""
     return system, prompt
+
+
+def expand_keywords(topic: dict) -> tuple[str, str, dict]:
+    """把使用者的關鍵字擴充成同義詞與相關說法，提高搜尋的涵蓋率。回傳 (system, prompt, JSON schema)。"""
+    schema = {
+        "type": "object",
+        "properties": {"keywords": {"type": "array", "items": {"type": "string"}}},
+        "required": ["keywords"],
+        "additionalProperties": False,
+    }
+    system = "你是熟悉學術資料庫檢索的研究館員，擅長為文獻搜尋設計關鍵字。"
+    kws = "\n".join(f"- {k}" for k in topic["keywords"])
+    prompt = f"""研究主題：{topic['name']}
+主題說明：{topic.get('description', '')}
+
+使用者的關鍵字：
+{kws}
+
+請把這些關鍵字擴充成英文檢索詞清單，用來在 Web of Science、Crossref、期刊 RSS 搜尋新論文：
+- 保留使用者原本的每一個關鍵字
+- 加入同義詞、常見的不同說法、具體的技術或產品名稱（例如 generative AI 也常寫成 ChatGPT、large language model、LLM）
+- 每個檢索詞 2–4 個英文單字，不要用布林運算子或引號
+- 只加入真的和主題相關的詞，總數不超過 15 個"""
+    return system, prompt, schema

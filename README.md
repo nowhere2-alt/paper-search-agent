@@ -57,7 +57,7 @@ export WOS_API_KEY=...                               # Web of Science Starter AP
 # 選填（建議）：
 export ELSEVIER_API_KEY=...    # Elsevier ScienceDirect API 金鑰（https://dev.elsevier.com，學術用途免費）
 export S2_API_KEY=...          # Semantic Scholar 免費金鑰，避免被限速
-export CONTACT_EMAIL=you@example.com   # Crossref / OpenAlex 的 polite pool，速度較快較穩定
+export CONTACT_EMAIL=you@example.com   # Crossref / OpenAlex 的 polite pool；Unpaywall（找合法全文）也需要
 ```
 
 ## 優先期刊清單（journals.yaml）
@@ -257,6 +257,18 @@ python -m pytest
 ```
 
 測試全部使用假資料，不需要網路或任何 API 金鑰。瀏覽器測試需要 Chromium，Codex 測試需要 codex CLI，缺少時會自動略過。每次 push 時，GitHub Actions（`.github/workflows/tests.yml`）會自動跑全部測試。
+
+## 解析品質
+
+- **解析附原文頁碼**：
+  - Claude 版開啟了 citations（引用）功能，解析文章中的數據與論點會自動標上出處頁碼，例如 `[p.5]`，方便回頭核對原文，也降低 AI 杜撰數字的風險。
+  - Codex 版沒有這個功能，所以擷取 PDF 文字時會標上每頁頁碼，並要求 Codex 在句末標註出處頁碼。
+- **找到更多合法全文**：設定 `CONTACT_EMAIL` 後，會向 Unpaywall 查詢每篇論文所有合法的開放取用版本（出版社 OA、作者自存版、機構典藏），並依「正式版 → 接受稿 → 投稿版」逐一嘗試下載，直到真的拿到 PDF。
+- **關鍵字擴充**（`keyword_expansion: true`）：
+  - AI 會把關鍵字擴充成同義詞與不同說法（例如 generative AI → ChatGPT、large language model），減少因用詞不同而漏掉的論文。
+  - 擴充結果存在 `library/.state/keywords/<folder>.json`，可以直接編輯；修改 config 的 `keywords` 或 `description` 後才會重新產生。
+- **WoS 以 ISSN 篩選期刊**：不受期刊名稱寫法差異影響。若 WoS Starter API 不接受 ISSN 欄位，會自動改用期刊名稱。
+- **快報附「資料來源狀態」**：每份快報最後會列出各資料庫找到幾篇、哪些 API 無法使用（例如金鑰失效），以及改用了哪些備援、取得幾篇全文。來源出問題時，不用翻 log 也看得到。
 
 ## 錯誤處理與重試
 

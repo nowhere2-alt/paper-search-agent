@@ -103,6 +103,8 @@ def test_analyze_sends_pdf_text(codex_home, tmp_path):
     assert llm.analyze(PAPER, TOPIC, pdf) == "全文模式：含標記"
     assert llm.analyze(PAPER, TOPIC, None) == "摘要模式"
     assert codex_home[0]["effort"] == "high"
+    assert "[第 1 頁]" in codex_home[0]["user"], "全文要附頁碼標記"
+    assert "標註出處頁碼" in codex_home[0]["user"] and "標註出處頁碼" not in codex_home[1]["user"]
 
 
 def test_failure_returns_none(monkeypatch, tmp_path):

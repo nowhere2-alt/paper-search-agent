@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import hashlib
+import json
 import logging
 from datetime import date, timedelta
 from pathlib import Path
@@ -11,7 +13,7 @@ from .enrich import enrich
 from .journals import Journal, load_tiers
 from .llm import make_llm
 from .browser import browser_fallback
-from .models import Paper, SourceUnavailable
+from .models import Paper, SourceStatus, SourceUnavailable
 from .sources import SOURCES
 from .store import MAX_ATTEMPTS, Store
 
@@ -22,23 +24,28 @@ MERGE_FIELDS = ("abstract", "pdf_url", "doi", "arxiv_id", "venue", "published")
 
 
 def collect(topic: dict, since: date, limit: int, journals: list[Journal] | None = None,
-            cfg: dict | None = None, use_browser: bool = True) -> list[Paper]:
+            cfg: dict | None = None, use_browser: bool = True,
+            status: dict[str, SourceStatus] | None = None) -> list[Paper]:
     """依 sources 的順序抓論文並跨資料庫去重。排越前面的來源是主要來源：
     同一篇論文以主要來源的書目資料為準，缺的欄位（摘要、PDF 連結等）才由後面的來源補上。
     journals 有值時，各來源只搜尋這些期刊。API 無法使用時，改由 Claude 操作瀏覽器到該資料庫網站搜尋。"""
     cfg = cfg or {}
+    status = {} if status is None else status
     found: dict[str, Paper] = {}
     by_title: dict[str, Paper] = {}
     for name in topic.get("sources", list(SOURCES)):
+        st = status.setdefault(name, SourceStatus())
         try:
             papers = SOURCES[name](topic["keywords"], since, limit, topic, journals)
         except Exception as e:  # 單一資料庫掛掉不影響其他來源
             missing = e.journals if isinstance(e, SourceUnavailable) and e.journals else journals
             papers = list(e.partial) if isinstance(e, SourceUnavailable) else []
             log.warning("[%s] API 無法使用：%s", name, e)
+            st.add(st.errors, _short_error(e))
             # 備援：瀏覽器（dry-run 時不啟動）→ 被擋或無法使用時改讀期刊 RSS
             papers += browser_fallback(name, topic["keywords"], missing, since, limit, cfg,
-                                       allow_browser=use_browser)
+                                       allow_browser=use_browser, notes=st.notes)
+        st.found += len(papers)
         log.info("[%s] 找到 %d 篇", name, len(papers))
         for p in papers:
             if not p.title:
@@ -55,6 +62,18 @@ def collect(topic: dict, since: date, limit: int, journals: list[Journal] | None
                     setattr(existing, f, getattr(p, f))
             existing.extra.setdefault("also_in", []).append(name)
     return list(found.values())
+
+
+def _short_error(e: Exception) -> str:
+    """快報用的簡短錯誤說明（不放網址與完整堆疊）。"""
+    if isinstance(e, SourceUnavailable):
+        return str(e)
+    text = str(e)
+    for marker, label in (("ProxyError", "連線被拒"), ("ConnectionError", "連線失敗"), ("Timeout", "逾時"),
+                          ("401", "金鑰無效（401）"), ("403", "沒有權限（403）"), ("429", "超過額度或太頻繁（429）")):
+        if marker in text or marker in type(e).__name__:
+            return label
+    return f"{type(e).__name__}"
 
 
 def search_passes(cfg: dict, topic: dict, root: Path) -> list[tuple[str, int, list[Journal] | None]]:
@@ -151,6 +170,36 @@ def tier_window(store: Store, topic: str, tier: int, today: date, lookback: int,
     return max(since, today - timedelta(days=cfg.get("max_lookback_days", 60)))
 
 
+def effective_keywords(cfg: dict, topic: dict, root: Path, llm) -> list[str]:
+    """keyword_expansion 開啟時，由 AI 把關鍵字擴充成同義詞清單（保留原本的關鍵字）。
+
+    結果存在 library/.state/keywords/<folder>.json，可以直接編輯；只有修改 config 的
+    keywords 或 description 時才會重新產生。dry-run 或 AI 失敗時用原本的關鍵字。"""
+    original = topic["keywords"]
+    if not topic.get("keyword_expansion", cfg.get("keyword_expansion", False)):
+        return original
+    path = root / ".state" / "keywords" / f"{topic['folder']}.json"
+    source = hashlib.sha1(json.dumps([original, topic.get("description", "")], ensure_ascii=False)
+                          .encode()).hexdigest()[:12]
+    if path.exists():
+        data = json.loads(path.read_text(encoding="utf-8"))
+        if data.get("source") == source:
+            return data["keywords"]
+    if llm is None:
+        return original
+    expanded, err = _try(llm.expand_keywords, topic)
+    if not expanded:
+        log.warning("關鍵字擴充失敗，改用原本的關鍵字：%s", err)
+        return original
+    keywords = list(dict.fromkeys([*original, *(k.strip() for k in expanded if k.strip())]))[:20]
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(json.dumps({
+        "說明": "AI 擴充的檢索詞，可以直接編輯。修改 config 的 keywords 或 description 後會重新產生。",
+        "source": source, "keywords": keywords}, ensure_ascii=False, indent=2), encoding="utf-8")
+    log.info("關鍵字已擴充為 %d 個：%s", len(keywords), "、".join(keywords))
+    return keywords
+
+
 def run(cfg: dict, days: int | None = None, dry_run: bool = False) -> list[Path]:
     root = Path(cfg.get("output_dir", "library"))
     store = Store(root / ".state" / "papers.db")
@@ -169,6 +218,8 @@ def run(cfg: dict, days: int | None = None, dry_run: bool = False) -> list[Path]
         strategy = topic.get("tier_strategy", cfg.get("tier_strategy", "fallback"))
         enough = topic.get("tier_min_results", cfg.get("tier_min_results", 5))
         breaker = Breaker()
+        status: dict[str, SourceStatus] = {}
+        search_topic = {**topic, "keywords": effective_keywords(cfg, topic, root, llm)}
 
         # 1) 依 tier 逐層搜尋 → 補資料 → 用摘要分類評分；fallback 策略下高相關論文夠多就停止往下一層
         scored: list[tuple[Paper, dict]] = []
@@ -181,7 +232,7 @@ def run(cfg: dict, days: int | None = None, dry_run: bool = False) -> list[Path]
             log.info("--- %s（%s 起）---", label, since.isoformat())
             new = []
             # dry-run 不呼叫 AI，所以也不啟動瀏覽器備援（RSS 仍會讀）
-            for p in collect(topic, since, limit, journals, cfg, use_browser=not dry_run):
+            for p in collect(search_topic, since, limit, journals, cfg, use_browser=not dry_run, status=status):
                 keys = {p.uid, p.title_key} - {None}
                 if keys & seen_run or store.seen(name, p) or store.gave_up(name, p):
                     continue
@@ -266,7 +317,7 @@ def run(cfg: dict, days: int | None = None, dry_run: bool = False) -> list[Path]
 
         # 3) 每日快報（依 tier、相關性排序）
         items.sort(key=lambda it: (it["tier"], -it["relevance"]))
-        digests.append(_write_digest(root, topic, items, llm, warning=breaker.tripped))
+        digests.append(_write_digest(root, topic, items, llm, warning=breaker.tripped, status=status))
     return digests
 
 
@@ -292,7 +343,22 @@ def _header(p: Paper, r: dict, pdf: Path | None) -> str:
     )
 
 
-def _write_digest(root: Path, topic: dict, items: list[dict], llm, warning: bool = False) -> Path:
+def _status_lines(status: dict[str, SourceStatus], items: list[dict]) -> list[str]:
+    lines = ["\n## 資料來源狀態\n"]
+    for name, st in status.items():
+        if st.errors:
+            lines.append(f"- ⚠ **{name}**：API 無法使用（{'；'.join(st.errors)}），共取得 {st.found} 篇")
+            lines += [f"  - 備援 {n}" for n in st.notes]
+        else:
+            lines.append(f"- ✓ **{name}**：{st.found} 篇")
+    if items:
+        with_pdf = sum(1 for it in items if it["pdf"])
+        lines.append(f"- 全文 PDF：{with_pdf}/{len(items)} 篇取得開放取用版本")
+    return lines
+
+
+def _write_digest(root: Path, topic: dict, items: list[dict], llm, warning: bool = False,
+                  status: dict[str, SourceStatus] | None = None) -> Path:
     today = date.today().isoformat()
     path = root / "digests" / f"{today}_{topic['folder']}.md"
     path.parent.mkdir(parents=True, exist_ok=True)
@@ -321,6 +387,8 @@ def _write_digest(root: Path, topic: dict, items: list[dict], llm, warning: bool
             venue = f"*{it['venue']}*　" if it["venue"] else ""
             lines.append(f"- **[{it['title']}]({it['url']})**　{venue}`{it['category']}`　"
                          f"相關性 {it['relevance']}/5 {link}\n  {it['tldr']}")
+    if status:
+        lines += _status_lines(status, items)
     path.write_text("\n".join(lines) + "\n", encoding="utf-8")
     log.info("快報已寫入 %s", path)
     return path

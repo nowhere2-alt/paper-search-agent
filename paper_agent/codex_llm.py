@@ -26,7 +26,9 @@ def pdf_text(path: Path) -> str:
     from pypdf import PdfReader
 
     reader = PdfReader(str(path))
-    return "\n\n".join((page.extract_text() or "") for page in reader.pages).strip()
+    # 每頁前面加上頁碼標記，讓 Codex 可以在解析中標註出處頁碼
+    return "\n\n".join(f"[第 {i} 頁]\n{page.extract_text() or ''}"
+                       for i, page in enumerate(reader.pages, start=1)).strip()
 
 
 class CodexLLM:
@@ -98,9 +100,18 @@ class CodexLLM:
             basis = f"以下 <paper> 標籤內是從 PDF 擷取的論文全文{note}。\n<paper>\n{fulltext}\n</paper>"
         else:  # 沒有 PDF，或掃描檔擷取不到文字
             basis = prompts.ABSTRACT_ONLY
-        system, prompt = prompts.analyze(paper, topic, self.language, basis)
+        system, prompt = prompts.analyze(paper, topic, self.language, basis,
+                                         page_hint=basis != prompts.ABSTRACT_ONLY)
         return self.run(f"{system}\n\n{prompt}\n\n直接輸出解析文章的 Markdown，不要加其他說明。",
                         effort=self.analysis_effort)
+
+    def expand_keywords(self, topic: dict) -> list[str]:
+        system, prompt, schema = prompts.expand_keywords(topic)
+        text = self.run(f"{system}\n\n{prompt}", schema=schema, effort="low",
+                        timeout=min(self.timeout, 180), model=self.classify_model)
+        if not text:
+            raise RuntimeError("Codex 沒有回應")
+        return json.loads(text)["keywords"]
 
     def daily_overview(self, topic: dict, items: list[dict]) -> str | None:
         system, prompt = prompts.overview(topic, items, self.language)

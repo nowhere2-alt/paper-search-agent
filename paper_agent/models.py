@@ -17,6 +17,19 @@ class SourceUnavailable(Exception):
 
 
 @dataclass
+class SourceStatus:
+    """一次執行中某個資料來源的狀況，寫進每日快報的「資料來源狀態」。"""
+
+    found: int = 0
+    errors: list[str] = field(default_factory=list)  # API 無法使用的原因
+    notes: list[str] = field(default_factory=list)   # 備援（瀏覽器、RSS）的結果
+
+    def add(self, items: list[str], text: str) -> None:
+        if text not in items:
+            items.append(text)
+
+
+@dataclass
 class Paper:
     title: str
     abstract: str

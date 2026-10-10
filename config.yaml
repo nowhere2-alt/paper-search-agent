@@ -13,6 +13,9 @@ tier_min_results: 5            # fallback 的門檻：累計幾篇高相關論�
 tier_every_days:
   3: 7                         # Tier 3（相關學科）每週搜一次，省下大量分類費用
 max_lookback_days: 60          # 補搜最多往回幾天
+# 由 AI 把主題的關鍵字擴充成同義詞（例如 generative AI → ChatGPT、LLM），減少因用詞不同而漏掉的論文。
+# 擴充結果存在 library/.state/keywords/<folder>.json，可以直接編輯；修改 keywords 或 description 後會重新產生。
+keyword_expansion: true
 
 # 瀏覽器備援：API 無法使用（沒有金鑰、額度用完、連線失敗）時，由 Claude 操作瀏覽器到資料庫網站搜尋。
 # 需要先安裝：pip install playwright && playwright install chromium

@@ -32,11 +32,26 @@ def test_title_key_ignores_case_and_punctuation_but_not_short_titles():
 
 
 def test_wos_query_restricts_journals_and_years():
-    q = wos.build_query(KW, date(2026, 10, 1), {}, [TM, JST])
+    no_issn = Journal("Tourism Economics", "SAGE", 1)
+    q = wos.build_query(KW, date(2026, 10, 1), {}, [TM, JST, no_issn])
     assert q.startswith('TS=("generative AI tourism" OR "ChatGPT hospitality"')
-    assert 'SO=("TOURISM MANAGEMENT" OR "JOURNAL OF SUSTAINABLE TOURISM")' in q
+    assert '(IS=(0261-5177 OR 0966-9582) OR SO=("TOURISM ECONOMICS"))' in q
+    by_name = wos.build_query(KW, date(2026, 10, 1), {}, [TM, JST], use_issn=False)
+    assert 'SO=("TOURISM MANAGEMENT" OR "JOURNAL OF SUSTAINABLE TOURISM")' in by_name
     assert "PY=(2026-" in q
     assert wos.build_query(KW, date(2026, 10, 1), {"wos_query": "TS=x"}) == "TS=x"
+
+
+def test_wos_falls_back_to_journal_names_when_issn_rejected(monkeypatch):
+    monkeypatch.setenv("WOS_API_KEY", "k")
+    def respond(url, params):
+        if "IS=(" in params["q"]:
+            return FakeResponse(status=400)
+        return FakeResponse({"metadata": {"total": 0}, "hits": []})
+    router = Router({"wos-starter": respond})
+    monkeypatch.setattr("requests.get", router)
+    assert wos.search(KW, date(2026, 10, 1), 10, {}, [TM]) == []
+    assert ["IS=(" in p["q"] for _, p in router.calls] == [True, False]
 
 
 def test_wos_without_key_is_unavailable():
