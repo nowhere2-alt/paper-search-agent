@@ -8,7 +8,9 @@ import logging
 from datetime import date, timedelta
 from pathlib import Path
 
+from . import notify, weekly
 from .downloader import download_pdf
+from .export import export
 from .enrich import enrich
 from .journals import Journal, load_tiers
 from .llm import make_llm
@@ -124,6 +126,7 @@ class Digests(list):
     """run() 的結果：快報路徑清單；ai_failed 表示有主題因 AI 服務連續失敗而中止。"""
 
     ai_failed: bool = False
+    weekly: list[Path] = []
 
 
 def _try(fn, *args):
@@ -315,14 +318,22 @@ def run(cfg: dict, days: int | None = None, dry_run: bool = False) -> list[Path]
             digests.ai_failed = True
             log.error("AI 服務連續 %d 次失敗，已停止本主題的處理；尚未處理的論文下次執行會重試", Breaker.LIMIT)
 
-        # 3) 每日快報（依 tier、相關性排序）
+        # 3) 匯出（RIS／BibTeX、Zotero）→ 每日快報（依 tier、相關性排序）→ 推播
         items.sort(key=lambda it: (it["tier"], -it["relevance"]))
-        digests.append(_write_digest(root, topic, items, llm, warning=breaker.tripped, status=status))
+        export_notes = export(cfg, root, topic, [(it["paper"], it["result"], it["analysis"]) for it in items])
+        digest = _write_digest(root, topic, items, llm, warning=breaker.tripped, status=status, extra=export_notes)
+        digests.append(digest)
+        notify.send(cfg, f"{name}｜每日論文快報 {today.isoformat()}", digest.read_text(encoding="utf-8"),
+                    items, warning=breaker.tripped)
+
+    # 4) 每週綜合報告（到了設定的星期幾才產生，每週一次）
+    if not dry_run and weekly.is_due(cfg, today):
+        digests.weekly = weekly.generate(cfg, llm, today)
     return digests
 
 
 def _item(p: Paper, r: dict, analysis_path: Path | None, pdf: Path | None) -> dict:
-    return {"title": p.title, "url": p.url, "venue": p.venue or "", "tier": p.extra.get("tier", 0),
+    return {"paper": p, "result": r, "title": p.title, "url": p.url, "venue": p.venue or "", "tier": p.extra.get("tier", 0),
             "tier_label": p.extra.get("tier_label", ""), "category": r["category"],
             "relevance": r["relevance"], "tldr": r["tldr"], "analysis": analysis_path, "pdf": pdf}
 
@@ -343,7 +354,7 @@ def _header(p: Paper, r: dict, pdf: Path | None) -> str:
     )
 
 
-def _status_lines(status: dict[str, SourceStatus], items: list[dict]) -> list[str]:
+def _status_lines(status: dict[str, SourceStatus], items: list[dict], extra: list[str] | None = None) -> list[str]:
     lines = ["\n## 資料來源狀態\n"]
     for name, st in status.items():
         if st.errors:
@@ -354,11 +365,12 @@ def _status_lines(status: dict[str, SourceStatus], items: list[dict]) -> list[st
     if items:
         with_pdf = sum(1 for it in items if it["pdf"])
         lines.append(f"- 全文 PDF：{with_pdf}/{len(items)} 篇取得開放取用版本")
+    lines += [f"- {note}" for note in extra or []]
     return lines
 
 
 def _write_digest(root: Path, topic: dict, items: list[dict], llm, warning: bool = False,
-                  status: dict[str, SourceStatus] | None = None) -> Path:
+                  status: dict[str, SourceStatus] | None = None, extra: list[str] | None = None) -> Path:
     today = date.today().isoformat()
     path = root / "digests" / f"{today}_{topic['folder']}.md"
     path.parent.mkdir(parents=True, exist_ok=True)
@@ -388,7 +400,7 @@ def _write_digest(root: Path, topic: dict, items: list[dict], llm, warning: bool
             lines.append(f"- **[{it['title']}]({it['url']})**　{venue}`{it['category']}`　"
                          f"相關性 {it['relevance']}/5 {link}\n  {it['tldr']}")
     if status:
-        lines += _status_lines(status, items)
+        lines += _status_lines(status, items, extra)
     path.write_text("\n".join(lines) + "\n", encoding="utf-8")
     log.info("快報已寫入 %s", path)
     return path

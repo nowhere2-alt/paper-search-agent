@@ -1,35 +1,8 @@
-output_dir: library            # 論文、解析文章、每日快報都存在這裡
-lookback_days: 3               # 每次往回搜尋幾天（每天跑時設 2–3 天，避免漏掉延遲上架的論文）
-max_results_per_source: 50     # 每個資料庫每次最多抓幾篇
-min_relevance: 3               # 相關性 1–5，低於此分數的只記錄、不下載不解析
-max_analyses_per_topic: 10     # 每個主題每天最多深度解析幾篇（控制 API 花費）
+# Claude 版設定：python -m paper_agent（預設讀這個檔案）
+# 共用設定（主題、期刊、搜尋、匯出、推播）在 settings.yaml。
+include: settings.yaml
 
-# 優先期刊清單（見 journals.yaml）
-journal_list: journals.yaml
-tier_strategy: fallback        # fallback：Tier 1 的高相關論文不夠才搜 Tier 2、Tier 3；all：每次都搜全部 tier
-tier_min_results: 5            # fallback 的門檻：累計幾篇高相關論文（≥ min_relevance）就不再往下一層
-# 各層級多久搜一次（天）。沒列出的層級每天搜。搜尋時會往回補到上次搜這一層的日期，所以不會漏掉中間的論文；
-# 電腦關機幾天、或 fallback 策略這幾天沒搜到某一層，下次也會自動補搜。
-tier_every_days:
-  3: 7                         # Tier 3（相關學科）每週搜一次，省下大量分類費用
-max_lookback_days: 60          # 補搜最多往回幾天
-# 由 AI 把主題的關鍵字擴充成同義詞（例如 generative AI → ChatGPT、LLM），減少因用詞不同而漏掉的論文。
-# 擴充結果存在 library/.state/keywords/<folder>.json，可以直接編輯；修改 keywords 或 description 後會重新產生。
-keyword_expansion: true
-
-# 瀏覽器備援：API 無法使用（沒有金鑰、額度用完、連線失敗）時，由 Claude 操作瀏覽器到資料庫網站搜尋。
-# 需要先安裝：pip install playwright && playwright install chromium
-# 對應關係：wos → Web of Science 網站；sciencedirect → ScienceDirect 網站；
-#           crossref 查不到的期刊 → 依 publisher 到 Taylor & Francis / SAGE / Emerald / Wiley / Springer 網站
-# 瀏覽器被網站判定為機器人而擋下、失敗或沒開啟時，改讀期刊 RSS（見 journals.yaml 的 rss 欄位），不會嘗試繞過阻擋。
-browser:
-  enabled: true
-  headless: true               # 想看 Claude 怎麼操作就改成 false
-  profile_dir: ~/.paper-agent/browser-profile   # 專用瀏覽器設定檔，只在這裡登入要搜尋的資料庫
-  max_steps: 40                # 每個網站最多操作幾輪（每輪約一次 Claude 呼叫），控制花費
-  effort: medium
-  extra_allowed_hosts: []      # 學校 SSO 登入網域，例如 [sso.youruniversity.edu.tw]
-
+engine: claude
 claude:
   model: claude-opus-5-5       # 深度解析與每日總覽用的模型
   # 分類只看標題與摘要，用 Haiku 5.5 費用約為 Opus 5.5 的 1/40。想讓分類也用 Opus，把這行刪掉即可。
@@ -41,35 +14,6 @@ claude:
   use_batch: true
   batch_timeout_min: 60        # 最壞情況：每層分類＋解析各一批，60 分鐘×4 仍在 GitHub Actions 的 6 小時上限內
 
-topics:
-  - name: 生成式 AI 在觀光餐旅業的應用
-    folder: genai_hospitality  # library/ 底下的資料夾名稱（建議英文）
-    description: >
-      研究 ChatGPT 等大型語言模型如何影響旅客決策、服務接觸與餐旅業營運，
-      特別關注消費者信任與採用意願。
-    keywords:
-      - generative AI tourism
-      - ChatGPT hospitality
-      - large language model travel
-      - AI chatbot hotel
-    # 是否以 journals.yaml 的期刊清單為搜尋範圍（false = 不限期刊，搜尋所有論文）
-    use_journal_list: true
-    # tiers: [1, 2]            # 只搜指定的 tier（預設全部，依 tier_strategy 逐層）
-    open_search: false         # true = 期刊清單搜完後，再做一次不限期刊的搜尋
-    # 順序 = 優先順序：第一個是主要來源，書目資料以它為準；後面的來源補充摘要、PDF 與漏掉的論文
-    # 可用：wos（Web of Science）、sciencedirect（Elsevier 官方 API）、crossref（各出版社登錄的資料）、
-    #       openalex、semantic_scholar、arxiv（arXiv 只在不限期刊時使用）
-    sources: [wos, sciencedirect, crossref, openalex, semantic_scholar]
-    # Web of Science 檢索設定（選填）
-    wos_db: WOS                  # WOS = 核心合集；WOK = 所有資料庫
-    # wos_filter 會以 AND 接在自動產生的檢索式後面，例如只看特定期刊（SO=期刊名稱）：
-    # wos_filter: SO=("TOURISM MANAGEMENT" OR "INTERNATIONAL JOURNAL OF HOSPITALITY MANAGEMENT" OR "ANNALS OF TOURISM RESEARCH")
-    # 或用 wos_query 寫完整的 WoS 進階檢索式（設定後會忽略 keywords 與 wos_filter）：
-    # wos_query: TS=("generative AI" OR ChatGPT) AND SO=("TOURISM MANAGEMENT" OR "ANNALS OF TOURISM RESEARCH") AND PY=(2025-2026)
-    min_relevance: 3
-    # 分類 = 子資料夾。key 是資料夾名，value 是給 Claude 看的分類說明
-    categories:
-      consumer_behavior: 旅客/消費者對 AI 的態度、信任、採用意願、決策行為
-      service_operations: 飯店、餐廳、旅行社導入 AI 的營運、服務流程、員工影響
-      marketing_content: AI 生成的行銷內容、評論、目的地形象
-      methods_review: 文獻回顧、研究方法、量表發展
+browser:
+  profile_dir: ~/.paper-agent/browser-profile   # 專用瀏覽器設定檔，只在這裡登入要搜尋的資料庫
+  max_steps: 40                # 每個網站最多操作幾輪（每輪約一次 Claude 呼叫），控制花費

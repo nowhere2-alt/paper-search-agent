@@ -105,6 +105,10 @@ class CodexLLM:
         return self.run(f"{system}\n\n{prompt}\n\n直接輸出解析文章的 Markdown，不要加其他說明。",
                         effort=self.analysis_effort)
 
+    def weekly_report(self, topic: dict, entries: list[dict]) -> str | None:
+        system, prompt = prompts.weekly(topic, entries, self.language)
+        return self.run(f"{system}\n\n{prompt}", effort="high")
+
     def expand_keywords(self, topic: dict) -> list[str]:
         system, prompt, schema = prompts.expand_keywords(topic)
         text = self.run(f"{system}\n\n{prompt}", schema=schema, effort="low",

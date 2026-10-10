@@ -113,3 +113,12 @@ class Store:
     def mark_tier_run(self, topic: str, tier: int, day: date) -> None:
         self.db.execute("INSERT OR REPLACE INTO tier_runs VALUES (?,?,?)", (topic, tier, day.isoformat()))
         self.db.commit()
+
+    def recent(self, topic: str, since: datetime, min_relevance: int) -> list[dict]:
+        """某主題在 since 之後處理過、相關性夠高的論文（每週報告用），依相關性排序。"""
+        rows = self.db.execute(
+            "SELECT title, category, relevance, tldr, analysis_path, meta FROM papers "
+            "WHERE topic = ? AND processed_at >= ? AND relevance >= ? ORDER BY relevance DESC, processed_at",
+            (topic, since.isoformat(), min_relevance)).fetchall()
+        return [{"title": r[0], "category": r[1], "relevance": r[2], "tldr": r[3],
+                 "analysis_path": r[4], **json.loads(r[5] or "{}")} for r in rows]

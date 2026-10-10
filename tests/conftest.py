@@ -38,9 +38,11 @@ class Router:
     def __init__(self, routes: dict | None = None):
         self.routes = routes or {}
         self.calls: list[tuple[str, dict | None]] = []
+        self.payloads: list[dict | None] = []  # requests.post 的 json
 
     def __call__(self, url, params=None, **kwargs):
         self.calls.append((url, params))
+        self.payloads.append(kwargs.get("json"))
         for fragment, response in self.routes.items():
             if fragment in url:
                 return response(url, params) if callable(response) else response

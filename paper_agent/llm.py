@@ -126,6 +126,12 @@ class LLM:
     def analyze(self, paper: Paper, topic: dict, pdf_path: Path | None) -> str | None:
         return self._call(self._analyze_params(paper, topic, pdf_path))
 
+    def weekly_report(self, topic: dict, entries: list[dict]) -> str | None:
+        system, prompt = prompts.weekly(topic, entries, self.language)
+        return self._call({"model": self.model, "max_tokens": 32000, "system": system,
+                           "messages": [{"role": "user", "content": prompt}],
+                           "output_config": {"effort": "high"}})
+
     def expand_keywords(self, topic: dict) -> list[str]:
         system, prompt, schema = prompts.expand_keywords(topic)
         text = self._call({"model": self.classify_model, "max_tokens": 4000, "system": system,

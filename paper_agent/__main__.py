@@ -5,8 +5,7 @@ import logging
 import os
 from pathlib import Path
 
-import yaml
-
+from .config import load_config
 from .journals import load_tiers
 from .pipeline import run
 
@@ -50,22 +49,30 @@ def main() -> None:
     ap.add_argument("--days", type=int, help="往回搜尋幾天（覆寫設定檔）")
     ap.add_argument("--dry-run", action="store_true", help="只搜尋並列出新論文，不呼叫 Claude、不下載")
     ap.add_argument("--list-journals", action="store_true", help="列出期刊清單與自動查到的 ISSN")
+    ap.add_argument("--weekly", action="store_true", help="立即產生每週綜合報告（不搜尋新論文）")
     ap.add_argument("--browser-login", metavar="SITE",
                     help="開啟瀏覽器手動登入資料庫，供瀏覽器備援使用（例如 wos）")
     args = ap.parse_args()
 
     logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
-    with open(args.config, encoding="utf-8") as f:
-        cfg = yaml.safe_load(f)
+    cfg = load_config(args.config)  # 支援 include：共用設定在 settings.yaml
     if args.list_journals:
         list_journals(cfg)
         return
     if args.browser_login:
         browser_login(cfg, args.browser_login)
         return
+    if args.weekly:
+        from .llm import make_llm
+        from .weekly import generate
+        for path in generate(cfg, make_llm(cfg), force=True):
+            print(f"每週報告：{path}")
+        return
     digests = run(cfg, days=args.days, dry_run=args.dry_run)
     for path in digests:
         print(f"快報：{path}")
+    for path in digests.weekly:
+        print(f"每週報告：{path}")
     if digests.ai_failed:
         # 以錯誤碼結束，排程（cron、GitHub Actions）才會顯示失敗並通知你
         raise SystemExit("AI 服務連續失敗：請檢查 API 金鑰（ANTHROPIC_API_KEY）、額度，或 Codex 是否已登入。")

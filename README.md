@@ -9,7 +9,7 @@
 ## 架構
 
 ```
-     config.yaml（主題、關鍵字、分類）＋ journals.yaml（Tier 1–3 優先期刊）
+     settings.yaml（主題、關鍵字、分類）＋ journals.yaml（Tier 1–3 優先期刊）
                     │
       ┌──── 依 Tier 逐層搜尋（fallback：高相關論文不夠才搜下一層）────┐
       │                                                              │
@@ -68,7 +68,7 @@ export CONTACT_EMAIL=you@example.com   # Crossref / OpenAlex 的 polite pool；U
 - **Tier 2**：相關觀光餐旅期刊
 - **Tier 3**：行銷、管理、心理、資管等相關學科（備援）
 
-搜尋策略在 `config.yaml` 設定：
+搜尋策略在 `settings.yaml` 設定：
 
 | 設定 | 說明 |
 |---|---|
@@ -126,7 +126,7 @@ python -m paper_agent --browser-login wos     # 開啟瀏覽器，用學校帳�
 
 登入狀態會保存在專用的瀏覽器設定檔（預設 `~/.paper-agent/browser-profile`），和你平常用的瀏覽器分開。如果登入時經過學校的 SSO 網域（例如 `sso.xxx.edu.tw`），請把它加到 `config.yaml` 的 `browser.extra_allowed_hosts`。出版社網站的搜尋不需要登入。
 
-`config.yaml` 的 `browser` 區塊可以設定：
+`settings.yaml` 的 `browser` 區塊可以設定（瀏覽器設定檔路徑與每個網站的步數上限在各引擎的 config 檔）：
 
 - `enabled`：開關
 - `headless: false`：顯示瀏覽器視窗，看 Claude 怎麼操作
@@ -152,7 +152,7 @@ python -m paper_agent --browser-login wos     # 開啟瀏覽器，用學校帳�
 
 1. 到 [Clarivate Developer Portal](https://developer.clarivate.com/apis/wos-starter) 註冊，訂閱 Web of Science Starter API。如果學校有訂閱 WoS，可以選機構方案（請先問學校圖書館），額度較高；沒有的話可以先用免費方案試用。
 2. 取得 API 金鑰後設定環境變數 `WOS_API_KEY`。沒有設定時，若已開啟瀏覽器備援，會改由 Claude 操作瀏覽器到 WoS 網站搜尋；沒開啟就略過 WoS，其他來源照常執行。
-3. 在 `config.yaml` 把 `wos` 放在 `sources` 第一個，它就是主要來源。只想用 WoS 時寫 `sources: [wos]`。
+3. 在 `settings.yaml` 把 `wos` 放在 `sources` 第一個，它就是主要來源。只想用 WoS 時寫 `sources: [wos]`。
 
 檢索方式：
 
@@ -166,9 +166,20 @@ python -m paper_agent --browser-login wos     # 開啟瀏覽器，用學校帳�
 
 > 參考專案 [cookjohn/wos-skills](https://github.com/cookjohn/wos-skills) 的做法是透過 Chrome 操作已登入的 WoS 網頁，呼叫網站內部的非公開 API。那種方式適合在 Claude Code 裡手動、互動式查詢，但不適合每天無人值守自動執行：它需要一直開著已登入的瀏覽器，網站改版就會失效，而且大量自動存取可能違反 Clarivate 與學校授權的使用條款，嚴重時可能導致學校的 WoS 存取權被暫停。所以本專案改用官方 API。
 
+## 設定檔
+
+| 檔案 | 內容 |
+|---|---|
+| `settings.yaml` | **共用設定**：研究主題、關鍵字、分類、期刊策略、搜尋與備援、匯出、推播、每週報告。平常只需要改這個檔案。 |
+| `journals.yaml` | 優先期刊清單（Tier 1–3） |
+| `config.yaml` | Claude 版專用：模型、批次處理等。`python -m paper_agent` 預設讀這個檔。 |
+| `config.codex.yaml` | Codex 版專用：codex 指令、模型等。 |
+
+`config.yaml` 與 `config.codex.yaml` 都用 `include: settings.yaml` 載入共用設定，所以兩個版本的主題與策略永遠一致。引擎設定檔裡的值會覆寫共用設定中的同名欄位。
+
 ## 使用
 
-1. 編輯 `config.yaml`：填入主題名稱、說明、關鍵字、要用的資料庫，以及分類資料夾。分類的說明寫得越具體，Claude 分得越準。必要時也調整 `journals.yaml`，並用 `--list-journals` 檢查 ISSN。
+1. 編輯 `settings.yaml`：填入主題名稱、說明、關鍵字、要用的資料庫，以及分類資料夾。分類的說明寫得越具體，Claude 分得越準。必要時也調整 `journals.yaml`，並用 `--list-journals` 檢查 ISSN。
 2. 先試跑，只搜尋、不花 API 費用：
    ```bash
    python -m paper_agent --dry-run --days 14
@@ -215,6 +226,41 @@ python -m paper_agent --config config.codex.yaml
 - **每天自動執行**：
   - 本機：cron 指令加上 `--config config.codex.yaml`。
   - GitHub Actions：用 `.github/workflows/daily-codex.yml`（需要 `CODEX_API_KEY` secret），並停用 Claude 版的 `daily.yml`。
+
+## 匯出、推播與每週報告
+
+**匯出到 Zotero／EndNote／Mendeley**
+
+- 每天的高相關論文會存成 `library/exports/<日期>_<主題>.ris` 與 `.bib`。在 Zotero 選「檔案 → 匯入」，選當天的檔案即可，不會重複。`<主題>_all.ris` 則是累積的全部論文。
+- 想讓論文直接進 Zotero：在 `settings.yaml` 把 `zotero.enabled` 改成 `true`、填入 `library_id`，並設定環境變數 `ZOTERO_API_KEY`（到 [zotero.org/settings/keys](https://www.zotero.org/settings/keys) 建立，需勾選寫入權限）。論文會放在「論文追蹤／主題／分類」資料夾，深度解析附成子筆記。
+
+**推播**（`settings.yaml` 的 `notify` 區塊，金鑰放環境變數）
+
+| 管道 | 需要的環境變數 |
+|---|---|
+| Email | `SMTP_HOST`、`SMTP_PORT`（預設 587）、`SMTP_USER`、`SMTP_PASSWORD`；收件人填在 `notify.email.to` |
+| LINE | `LINE_CHANNEL_TOKEN`、`LINE_USER_ID`（LINE Messaging API；LINE Notify 已於 2025 年停止服務） |
+| Slack／Discord／Google Chat | `NOTIFY_WEBHOOK_URL`；Discord 請設 `notify.webhook.kind: discord` |
+| Notion | `NOTION_TOKEN`；資料庫 ID 填在 `notify.notion.database_id`，並把 integration 加入資料庫的連線 |
+
+- Email 與 Notion 收到完整快報；LINE 與聊天軟體收到精簡版（標題、相關性、一句話摘要、連結）。
+- 某個管道失敗不影響其他管道，也不會讓排程失敗。
+- 用 Gmail 寄信時，`SMTP_HOST` 填 `smtp.gmail.com`，`SMTP_PASSWORD` 要用 Google 帳戶的「應用程式密碼」。
+
+**每週綜合報告**
+
+每週一（`weekly.weekday` 可改）的執行結束後，把過去 7 天的高相關論文與解析重點，整理成：
+
+- 本週重點與研究趨勢
+- 常用方法與理論
+- 研究缺口與可行的研究問題
+- 推薦精讀清單
+
+報告存在 `library/weekly/`，並依推播設定送出。隨時想看可以手動產生：
+
+```bash
+python -m paper_agent --weekly
+```
 
 ## 每天自動執行
 

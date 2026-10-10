@@ -8,6 +8,11 @@ A daily academic paper tracker. `python -m paper_agent` searches journal databas
 topics in a config file, downloads open-access PDFs, has an LLM classify and analyze them, and writes a
 daily digest to `library/digests/`.
 
+Configuration: `settings.yaml` holds everything shared (topics, journal strategy, search, fallback, export,
+notify, weekly). `config.yaml` and `config.codex.yaml` only hold engine settings and pull in the shared file with
+`include: settings.yaml` (`paper_agent/config.py` deep-merges; the including file wins). Put new shared options in
+`settings.yaml`, not in both engine files.
+
 There are two engines, chosen by `engine:` in the config file:
 
 | Config file | Engine | LLM calls go through | Browser fallback |
@@ -26,6 +31,7 @@ pip install -r requirements.txt
 python -m paper_agent --config config.codex.yaml --dry-run --days 14   # search only, no LLM calls
 python -m paper_agent --config config.codex.yaml --list-journals       # check resolved ISSNs
 python -m paper_agent --config config.codex.yaml                       # full run
+python -m paper_agent --weekly                                         # weekly synthesis now
 ```
 
 The program needs outbound network access to the academic APIs (api.clarivate.com, api.elsevier.com,
@@ -62,6 +68,8 @@ python -m pytest            # all tests use mocks: no network, no API keys
   cancel → normal calls) against a fake client, and per-tier search windows (`tier_every_days`, backfill after gaps).
 - `tests/test_quality.py`: digest source-status section, Unpaywall and multi-candidate PDF download, citation page
   markers (`end_page_number` is exclusive), Codex page hints, and keyword expansion caching.
+- `tests/test_features.py`: config `include`, RIS/BibTeX export and Zotero sync (`export.py`), push channels
+  (`notify.py`: email, LINE Messaging API, Slack/Discord webhooks, Notion), and the weekly report (`weekly.py`).
 - `tests/test_sources.py`, `tests/test_fallback.py`: source parsing and the API → browser → RSS fallback chain.
 - `tests/test_browser.py`: the Playwright driver in real Chromium against `tests/fixtures/site/`, and the Claude
   browser agent against a local fake Messages API. Skipped without Chromium (`PAPER_AGENT_TEST_CHROMIUM` can point
