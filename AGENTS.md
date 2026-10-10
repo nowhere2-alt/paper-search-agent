@@ -51,7 +51,18 @@ access; do not work around the sandbox.
 
 ## Testing
 
-There is no network in most agent sandboxes, so test with mocks: patch `requests.get` / `requests.put`
-for the sources and replace the LLM with a fake object exposing `classify`, `analyze`, `daily_overview`.
-For the Codex engine, `codex exec` can be pointed at a local mock Responses API through a custom
-`model_provider` in a throwaway `CODEX_HOME`.
+```bash
+pip install -r requirements-dev.txt
+python -m pytest            # all tests use mocks: no network, no API keys
+```
+
+- `tests/test_pipeline.py`: dedup (DOI and title), per-topic records, per-paper error handling, retries
+  (`store.MAX_ATTEMPTS`), and the circuit breaker that stops on systemic AI failures without recording them.
+- `tests/test_sources.py`, `tests/test_fallback.py`: source parsing and the API → browser → RSS fallback chain.
+- `tests/test_browser.py`: the Playwright driver in real Chromium against `tests/fixtures/site/`, and the Claude
+  browser agent against a local fake Messages API. Skipped without Chromium (`PAPER_AGENT_TEST_CHROMIUM` can point
+  to an executable).
+- `tests/test_codex.py`: real `codex exec` against a local fake Responses API via a throwaway `CODEX_HOME`.
+  Skipped without the `codex` CLI.
+
+Add a test with every behavior change; CI (`.github/workflows/tests.yml`) runs the suite on each push.

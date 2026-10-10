@@ -13,7 +13,7 @@ from .llm import make_llm
 from .browser import browser_fallback
 from .models import Paper, SourceUnavailable
 from .sources import SOURCES
-from .store import Store
+from .store import MAX_ATTEMPTS, Store
 
 log = logging.getLogger(__name__)
 
@@ -28,6 +28,7 @@ def collect(topic: dict, since: date, limit: int, journals: list[Journal] | None
     journals 有值時，各來源只搜尋這些期刊。API 無法使用時，改由 Claude 操作瀏覽器到該資料庫網站搜尋。"""
     cfg = cfg or {}
     found: dict[str, Paper] = {}
+    by_title: dict[str, Paper] = {}
     for name in topic.get("sources", list(SOURCES)):
         try:
             papers = SOURCES[name](topic["keywords"], since, limit, topic, journals)
@@ -42,9 +43,12 @@ def collect(topic: dict, since: date, limit: int, journals: list[Journal] | None
         for p in papers:
             if not p.title:
                 continue
-            existing = found.get(p.uid)
+            # 先比 DOI／arXiv ID，再比標題：有的來源沒有 DOI（例如部分 RSS），靠標題認出同一篇
+            existing = found.get(p.uid) or (by_title.get(p.title_key) if p.title_key else None)
             if existing is None:
                 found[p.uid] = p
+                if p.title_key:
+                    by_title[p.title_key] = p
                 continue
             for f in MERGE_FIELDS:
                 if not getattr(existing, f) and getattr(p, f):
@@ -66,6 +70,45 @@ def search_passes(cfg: dict, topic: dict, root: Path) -> list[tuple[str, int, li
     return passes
 
 
+class Breaker:
+    """AI 服務連續失敗時（例如金鑰失效、額度用完、Codex 未登入）停止本次處理。
+    這類失敗不是論文本身的問題，所以不計入各篇論文的失敗次數，下次執行全部重試。"""
+
+    LIMIT = 3
+
+    def __init__(self):
+        self.streak = 0
+        self.pending: list[tuple[Paper, str]] = []  # 尚未寫入的失敗紀錄
+
+    @property
+    def tripped(self) -> bool:
+        return self.streak >= self.LIMIT
+
+    def ok(self, store: Store, topic: str) -> None:
+        self.streak = 0
+        self.flush(store, topic)
+
+    def fail(self, paper: Paper, error: str) -> None:
+        self.streak += 1
+        self.pending.append((paper, error))
+
+    def flush(self, store: Store, topic: str) -> dict[str, int]:
+        """把個別失敗寫入紀錄；斷路器跳開時，連續失敗的那幾筆視為系統問題而丟棄。回傳 uid → 累計次數。"""
+        if self.tripped:
+            self.pending = self.pending[:-self.streak]
+        counts = {p.uid: store.record_failure(topic, p, err) for p, err in self.pending}
+        self.pending = []
+        return counts
+
+
+def _try(fn, *args):
+    """呼叫 AI；出錯時回傳 (None, 錯誤訊息)，不讓單篇論文中斷整次執行。"""
+    try:
+        return fn(*args), ""
+    except Exception as e:
+        return None, f"{type(e).__name__}: {e}"
+
+
 def run(cfg: dict, days: int | None = None, dry_run: bool = False) -> list[Path]:
     root = Path(cfg.get("output_dir", "library"))
     store = Store(root / ".state" / "papers.db")
@@ -77,24 +120,33 @@ def run(cfg: dict, days: int | None = None, dry_run: bool = False) -> list[Path]
     digests: list[Path] = []
 
     for topic in cfg["topics"]:
+        name = topic["name"]
         topic_dir = root / topic["folder"]
-        log.info("=== 主題：%s ===", topic["name"])
+        log.info("=== 主題：%s ===", name)
         min_rel = topic.get("min_relevance", cfg.get("min_relevance", 3))
         strategy = topic.get("tier_strategy", cfg.get("tier_strategy", "fallback"))
         enough = topic.get("tier_min_results", cfg.get("tier_min_results", 5))
+        breaker = Breaker()
 
         # 1) 依 tier 逐層搜尋 → 補資料 → 用摘要分類評分；fallback 策略下高相關論文夠多就停止往下一層
         scored: list[tuple[Paper, dict]] = []
         seen_run: set[str] = set()
         for label, tier, journals in search_passes(cfg, topic, root):
             log.info("--- %s ---", label)
-            # dry-run 不呼叫 Claude，所以也不啟動瀏覽器備援
-            new = [p for p in collect(topic, since, limit, journals, cfg, use_browser=not dry_run)
-                   if p.uid not in seen_run and not store.seen(p.uid)]
-            seen_run.update(p.uid for p in new)
+            new = []
+            # dry-run 不呼叫 AI，所以也不啟動瀏覽器備援（RSS 仍會讀）
+            for p in collect(topic, since, limit, journals, cfg, use_browser=not dry_run):
+                keys = {p.uid, p.title_key} - {None}
+                if keys & seen_run or store.seen(name, p) or store.gave_up(name, p):
+                    continue
+                seen_run |= keys
+                new.append(p)
             log.info("新論文 %d 篇", len(new))
             for p in new:
-                enrich(p)  # WoS 等來源缺摘要／PDF 時，依 DOI 補齊
+                try:
+                    enrich(p)  # WoS 等來源缺摘要／PDF 時，依 DOI 補齊
+                except Exception as e:
+                    log.warning("補資料失敗 %s：%s", p.title[:60], e)
                 p.extra.update(tier=tier, tier_label=label)
             if dry_run:
                 for p in new:
@@ -102,43 +154,70 @@ def run(cfg: dict, days: int | None = None, dry_run: bool = False) -> list[Path]
                           f"摘要={'有' if p.abstract else '無'} PDF={'有' if p.pdf_url else '無'}")
                 continue
             for p in new:
-                result = llm.classify(p, topic)
+                if breaker.tripped:
+                    break
+                result, err = _try(llm.classify, p, topic)
+                if result is None or result.get("relevance", 0) < 1:
+                    breaker.fail(p, err or "分類失敗（AI 拒答或沒有回應）")
+                    log.warning("  分類失敗，下次重試：%s %s", p.title[:60], err)
+                    continue
+                breaker.ok(store, name)
                 scored.append((p, result))
                 log.info("  [T%s|%s|%s] %s", tier, result["category"], result["relevance"], p.title[:80])
             relevant = sum(r["relevance"] >= min_rel for _, r in scored)
-            if strategy == "fallback" and relevant >= enough:
-                log.info("已有 %d 篇高相關論文（門檻 %d），不再往下一層搜尋", relevant, enough)
+            if breaker.tripped or (strategy == "fallback" and relevant >= enough):
+                if not breaker.tripped:
+                    log.info("已有 %d 篇高相關論文（門檻 %d），不再往下一層搜尋", relevant, enough)
                 break
         if dry_run:
             continue
 
         # 2) 夠相關的才下載 + 深度解析（控制成本）；優先順序：tier 越前面越優先，同 tier 依相關性
         scored.sort(key=lambda x: (x[0].extra.get("tier", 0), -x[1]["relevance"]))
-        items, analyzed = [], 0
+        items, analyzed, failed_analysis = [], 0, []
         for p, r in scored:
             if r["relevance"] < min_rel:
-                store.save(topic["name"], p, r["category"], r["relevance"], r["tldr"], None, None)
+                store.save(name, p, r["category"], r["relevance"], r["tldr"], None, None)
                 continue
             cat_dir = topic_dir / r["category"]
             cat_dir.mkdir(parents=True, exist_ok=True)
             pdf = download_pdf(p, cat_dir)
             analysis_path = None
             if analyzed < max_analyze:
-                text = llm.analyze(p, topic, pdf)
+                if breaker.tripped:
+                    continue  # AI 服務異常：這篇本來要解析，先不標記為已處理，下次重試
                 analyzed += 1
-                if text:
-                    analysis_path = cat_dir / f"{p.slug}.md"
-                    analysis_path.write_text(_header(p, r, pdf) + text, encoding="utf-8")
-            store.save(topic["name"], p, r["category"], r["relevance"], r["tldr"],
+                text, err = _try(llm.analyze, p, topic, pdf)
+                if not text:
+                    breaker.fail(p, err or "解析失敗（AI 拒答或沒有回應）")
+                    failed_analysis.append((p, r, pdf))
+                    log.warning("  解析失敗：%s %s", p.title[:60], err)
+                    continue
+                breaker.ok(store, name)
+                analysis_path = cat_dir / f"{p.slug}.md"
+                analysis_path.write_text(_header(p, r, pdf) + text, encoding="utf-8")
+            store.save(name, p, r["category"], r["relevance"], r["tldr"],
                        str(pdf) if pdf else None, str(analysis_path) if analysis_path else None)
-            items.append({"title": p.title, "url": p.url, "venue": p.venue or "",
-                          "tier_label": p.extra.get("tier_label", ""), "category": r["category"],
-                          "relevance": r["relevance"], "tldr": r["tldr"],
-                          "analysis": analysis_path, "pdf": pdf})
+            items.append(_item(p, r, analysis_path, pdf))
+
+        # 解析失敗的論文：還沒到重試上限就留到下次（不寫入已處理）；到上限則不再解析，但仍列進快報
+        counts = breaker.flush(store, name)
+        for p, r, pdf in failed_analysis:
+            if counts.get(p.uid, 0) >= MAX_ATTEMPTS:
+                store.save(name, p, r["category"], r["relevance"], r["tldr"], str(pdf) if pdf else None, None)
+                items.append(_item(p, r, None, pdf))
+        if breaker.tripped:
+            log.error("AI 服務連續 %d 次失敗，已停止本主題的處理；尚未處理的論文下次執行會重試", Breaker.LIMIT)
 
         # 3) 每日快報
-        digests.append(_write_digest(root, topic, items, llm))
+        digests.append(_write_digest(root, topic, items, llm, warning=breaker.tripped))
     return digests
+
+
+def _item(p: Paper, r: dict, analysis_path: Path | None, pdf: Path | None) -> dict:
+    return {"title": p.title, "url": p.url, "venue": p.venue or "",
+            "tier_label": p.extra.get("tier_label", ""), "category": r["category"],
+            "relevance": r["relevance"], "tldr": r["tldr"], "analysis": analysis_path, "pdf": pdf}
 
 
 def _header(p: Paper, r: dict, pdf: Path | None) -> str:
@@ -157,17 +236,22 @@ def _header(p: Paper, r: dict, pdf: Path | None) -> str:
     )
 
 
-def _write_digest(root: Path, topic: dict, items: list[dict], llm) -> Path:
+def _write_digest(root: Path, topic: dict, items: list[dict], llm, warning: bool = False) -> Path:
     today = date.today().isoformat()
     path = root / "digests" / f"{today}_{topic['folder']}.md"
     path.parent.mkdir(parents=True, exist_ok=True)
-    if not items and path.exists():
+    if not items and not warning and path.exists():
         return path  # 同一天重跑且沒有新論文時，保留早先的快報
     lines = [f"# {topic['name']}｜每日論文快報 {today}\n"]
+    if warning:
+        lines.append("> ⚠ AI 服務連續失敗（可能是金鑰失效、額度用完或未登入），本次只處理了部分論文；"
+                     "其餘論文下次執行會自動重試。\n")
     if not items:
         lines.append("今天沒有新的高相關論文。\n")
     else:
-        overview = llm.daily_overview(topic, items)
+        overview, err = _try(llm.daily_overview, topic, items)
+        if err:
+            log.warning("每日總覽產生失敗：%s", err)
         if overview:
             lines += ["## 今日研究動態\n", overview, ""]
         lines.append("## 論文清單\n")

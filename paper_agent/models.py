@@ -42,6 +42,15 @@ class Paper:
         return "title:" + hashlib.sha1(norm.encode()).hexdigest()[:16]
 
     @property
+    def title_key(self) -> str | None:
+        """第二組去重鍵：正規化標題。同一篇論文有的來源有 DOI、有的沒有時，靠它認出是同一篇。
+        太短的標題（如 Editorial、Book review）容易撞名，不用來比對。"""
+        norm = re.sub(r"[^a-z0-9]", "", self.title.lower())
+        if len(norm) < 25:
+            return None
+        return hashlib.sha1(norm.encode()).hexdigest()[:16]
+
+    @property
     def slug(self) -> str:
         """檔名：年份_第一作者姓氏_標題前幾個字。"""
         name = self.authors[0].strip() if self.authors and self.authors[0].strip() else "unknown"

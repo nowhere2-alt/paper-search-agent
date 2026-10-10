@@ -244,6 +244,23 @@ python -m paper_agent --config config.codex.yaml
 - **推播**：在 `pipeline.run()` 最後把快報寄到 Email、LINE Notify、Slack 或 Notion。
 - **調整解析格式**：修改 `paper_agent/llm.py` 裡 `analyze()` 的段落要求，例如加入「理論基礎」或「量表題項」等段落。
 
+## 開發與測試
+
+```bash
+pip install -r requirements-dev.txt
+python -m pytest
+```
+
+測試全部使用假資料，不需要網路或任何 API 金鑰。瀏覽器測試需要 Chromium，Codex 測試需要 codex CLI，缺少時會自動略過。每次 push 時，GitHub Actions（`.github/workflows/tests.yml`）會自動跑全部測試。
+
+## 錯誤處理與重試
+
+- 單篇論文分類或解析失敗（例如 API 暫時錯誤、逾時、AI 拒答）不會中斷整次執行，也不會被標記為已處理，下次執行會自動重試。連續 3 天失敗才放棄；解析失敗的論文放棄時仍會列進快報，只是沒有解析文章。
+- AI 服務連續失敗 3 次（通常是金鑰失效、額度用完或 Codex 未登入）時，會停止本主題的處理，並在快報開頭加上警告。這類失敗不算在個別論文頭上，服務恢復後全部會重試。
+- 已處理紀錄依主題分開：同一篇論文在不同主題各自評估。
+- 去重同時比對 DOI 與標題：同一篇論文從有 DOI 和沒有 DOI 的來源進來，都只處理一次。
+- 舊版的紀錄資料庫（`library/.state/papers.db`）會在第一次執行時自動轉成新格式，不會遺失紀錄。
+
 ## 注意事項
 
 - Google Scholar 沒有官方 API，且禁止爬蟲，所以不支援。OpenAlex 與 Semantic Scholar 的收錄範圍和它相近。

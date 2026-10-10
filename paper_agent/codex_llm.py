@@ -47,7 +47,10 @@ class CodexLLM:
             out = Path(tmp) / "last_message.txt"
             # -C 指向空的暫存資料夾：避免讀到專案的 AGENTS.md 或檔案，影響論文分析
             cmd = [self.bin, "exec", "--skip-git-repo-check", "--ephemeral", "--color", "never",
-                   "-s", sandbox, "-C", tmp, "-o", str(out)]
+                   "-s", sandbox, "-C", tmp, "-o", str(out),
+                   # 連不上模型時直接失敗，不要無限重連到逾時（交給主流程的重試與斷路器處理）。
+                   # 用 -c 而非 --disable：未來版本若移除這個功能名稱，-c 只會被忽略，不會報錯。
+                   "-c", "features.unbounded_connection_retries=false"]
             if self.model:
                 cmd += ["-m", self.model]
             if effort:
@@ -70,7 +73,8 @@ class CodexLLM:
 
     def classify(self, paper: Paper, topic: dict) -> dict:
         system, prompt, schema = prompts.classify(paper, topic, self.language)
-        text = self.run(f"{system}\n\n{prompt}\n\n只輸出符合 JSON schema 的結果。", schema=schema, effort="low")
+        text = self.run(f"{system}\n\n{prompt}\n\n只輸出符合 JSON schema 的結果。", schema=schema, effort="low",
+                        timeout=min(self.timeout, 180))  # 分類很快，不用等到長逾時
         try:
             return json.loads(text) if text else dict(prompts.FAILED)
         except json.JSONDecodeError:

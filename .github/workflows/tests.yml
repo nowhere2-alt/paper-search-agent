@@ -1,0 +1,22 @@
+# 每次 push 或 PR 自動跑測試。全部使用假資料，不需要任何 API 金鑰。
+name: tests
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  pytest:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+      - run: pip install -r requirements-dev.txt
+      - run: python -m playwright install --with-deps chromium   # 瀏覽器備援的測試需要
+      - run: npm install -g @openai/codex@0.162.1                # Codex 版的測試需要
+      - run: python -m pytest -q -rs
