@@ -63,8 +63,12 @@ def main() -> None:
     if args.browser_login:
         browser_login(cfg, args.browser_login)
         return
-    for path in run(cfg, days=args.days, dry_run=args.dry_run):
+    digests = run(cfg, days=args.days, dry_run=args.dry_run)
+    for path in digests:
         print(f"快報：{path}")
+    if digests.ai_failed:
+        # 以錯誤碼結束，排程（cron、GitHub Actions）才會顯示失敗並通知你
+        raise SystemExit("AI 服務連續失敗：請檢查 API 金鑰（ANTHROPIC_API_KEY）、額度，或 Codex 是否已登入。")
 
 
 if __name__ == "__main__":

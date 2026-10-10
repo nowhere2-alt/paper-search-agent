@@ -101,6 +101,12 @@ class Breaker:
         return counts
 
 
+class Digests(list):
+    """run() 的結果：快報路徑清單；ai_failed 表示有主題因 AI 服務連續失敗而中止。"""
+
+    ai_failed: bool = False
+
+
 def _try(fn, *args):
     """呼叫 AI；出錯時回傳 (None, 錯誤訊息)，不讓單篇論文中斷整次執行。"""
     try:
@@ -117,7 +123,7 @@ def run(cfg: dict, days: int | None = None, dry_run: bool = False) -> list[Path]
     since = date.today() - timedelta(days=lookback)
     limit = cfg.get("max_results_per_source", 50)
     max_analyze = cfg.get("max_analyses_per_topic", 10)
-    digests: list[Path] = []
+    digests = Digests()
 
     for topic in cfg["topics"]:
         name = topic["name"]
@@ -207,6 +213,7 @@ def run(cfg: dict, days: int | None = None, dry_run: bool = False) -> list[Path]
                 store.save(name, p, r["category"], r["relevance"], r["tldr"], str(pdf) if pdf else None, None)
                 items.append(_item(p, r, None, pdf))
         if breaker.tripped:
+            digests.ai_failed = True
             log.error("AI 服務連續 %d 次失敗，已停止本主題的處理；尚未處理的論文下次執行會重試", Breaker.LIMIT)
 
         # 3) 每日快報

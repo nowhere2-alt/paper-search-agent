@@ -98,7 +98,9 @@ def test_breaker_stops_on_systemic_failure_without_recording(cfg, run_pipeline):
     """AI 服務整個掛掉（例如金鑰失效）時：停止處理、快報加警告、不計入各篇論文的失敗次數。"""
     works = [openalex_work(f"Generative AI tourism paper number {i}", f"10.1/p{i}") for i in range(6)]
     llm = FakeLLM(raise_all=True)
-    digest = run_pipeline(cfg, router_with(works), llm)[0]
+    result = run_pipeline(cfg, router_with(works), llm)
+    assert result.ai_failed, "要讓排程顯示失敗"
+    digest = result[0]
     assert len(llm.classified) == 3, "連續 3 次失敗就該停止"
     assert "AI 服務連續失敗" in digest.read_text(encoding="utf-8")
     db = sqlite3.connect(Path(cfg["output_dir"]) / ".state" / "papers.db")
