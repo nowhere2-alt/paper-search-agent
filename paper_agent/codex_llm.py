@@ -35,13 +35,14 @@ class CodexLLM:
         if not shutil.which(self.bin):
             raise RuntimeError("找不到 codex 指令，請先安裝：npm install -g @openai/codex，並執行 codex login")
         self.model = cfg.get("model")  # 不指定就用 Codex 的預設模型
+        self.classify_model = cfg.get("classify_model") or self.model  # 分類可以用較便宜的模型
         self.language = language
         self.analysis_effort = cfg.get("analysis_effort", "high")
         self.timeout = cfg.get("timeout_sec", 900)
 
     def run(self, prompt: str, *, schema: dict | None = None, effort: str | None = None,
             sandbox: str = "read-only", extra_args: list[str] | None = None,
-            timeout: int | None = None) -> str | None:
+            timeout: int | None = None, model: str | None = None) -> str | None:
         """執行一次 codex exec，回傳最後一則訊息；失敗回傳 None。"""
         with tempfile.TemporaryDirectory(prefix="paper-agent-codex-") as tmp:
             out = Path(tmp) / "last_message.txt"
@@ -51,8 +52,8 @@ class CodexLLM:
                    # 連不上模型時直接失敗，不要無限重連到逾時（交給主流程的重試與斷路器處理）。
                    # 用 -c 而非 --disable：未來版本若移除這個功能名稱，-c 只會被忽略，不會報錯。
                    "-c", "features.unbounded_connection_retries=false"]
-            if self.model:
-                cmd += ["-m", self.model]
+            if model or self.model:
+                cmd += ["-m", model or self.model]
             if effort:
                 cmd += ["-c", f'model_reasoning_effort="{effort}"']
             if schema:
@@ -74,7 +75,7 @@ class CodexLLM:
     def classify(self, paper: Paper, topic: dict) -> dict:
         system, prompt, schema = prompts.classify(paper, topic, self.language)
         text = self.run(f"{system}\n\n{prompt}\n\n只輸出符合 JSON schema 的結果。", schema=schema, effort="low",
-                        timeout=min(self.timeout, 180))  # 分類很快，不用等到長逾時
+                        timeout=min(self.timeout, 180), model=self.classify_model)  # 分類很快，不用等到長逾時
         try:
             return json.loads(text) if text else dict(prompts.FAILED)
         except json.JSONDecodeError:

@@ -232,10 +232,15 @@ python -m paper_agent --config config.codex.yaml
 
 ## 成本控制
 
-- 分類只送標題與摘要，使用 `effort: low`，每篇花費很少
+- **分類用便宜的模型**：Claude 版預設 `classify_model: claude-haiku-5-5`，分類費用約為 Opus 的 1/40；深度解析仍用 Opus。Codex 版可在 `codex.classify_model` 指定。
+- **批次處理**：Claude 版預設 `use_batch: true`，分類與解析透過 Message Batches API 送出，費用減半、品質相同，但每次要等批次跑完（通常幾分鐘）。批次超過 `batch_timeout_min` 沒完成時，會自動改用一般呼叫。
+- **較不重要的期刊降低頻率**：`tier_every_days` 預設 Tier 3 每 7 天搜一次。每次搜尋會補到上次搜這一層的日期，不會漏掉論文。
+- 分類只送標題與摘要，使用 `effort: low`
 - 相關性低於 `min_relevance` 的論文不下載、不做全文解析
-- `max_analyses_per_topic` 限制每個主題每天最多解析幾篇（依相關性高低排序）
-- 全文解析最花錢；想省錢可以把 `analysis_effort` 調成 `medium`
+- `max_analyses_per_topic` 限制每個主題每天最多解析幾篇（依 Tier、相關性排序）
+- 全文解析最花錢；想再省可以把 `analysis_effort` 調成 `medium`
+
+（關於 prompt caching：分類時每篇共用的系統提示與主題說明只有數百個 token，低於快取的最低長度，開了也不會生效，所以沒有使用。）
 
 ## 擴充
 

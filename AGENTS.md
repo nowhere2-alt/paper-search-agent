@@ -58,6 +58,8 @@ python -m pytest            # all tests use mocks: no network, no API keys
 
 - `tests/test_pipeline.py`: dedup (DOI and title), per-topic records, per-paper error handling, retries
   (`store.MAX_ATTEMPTS`), and the circuit breaker that stops on systemic AI failures without recording them.
+- `tests/test_cost.py`: `classify_model`, the Message Batches path in `llm.py` (ordering, errors, refusals, timeout →
+  cancel → normal calls) against a fake client, and per-tier search windows (`tier_every_days`, backfill after gaps).
 - `tests/test_sources.py`, `tests/test_fallback.py`: source parsing and the API → browser → RSS fallback chain.
 - `tests/test_browser.py`: the Playwright driver in real Chromium against `tests/fixtures/site/`, and the Claude
   browser agent against a local fake Messages API. Skipped without Chromium (`PAPER_AGENT_TEST_CHROMIUM` can point

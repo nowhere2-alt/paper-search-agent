@@ -115,12 +115,48 @@ def _try(fn, *args):
         return None, f"{type(e).__name__}: {e}"
 
 
+def _classify_iter(llm, papers: list[Paper], topic: dict):
+    """逐篇（或以批次）分類，依序回傳 (論文, 結果或 None, 錯誤訊息)。"""
+    if hasattr(llm, "classify_batch"):
+        yield from llm.classify_batch(papers, topic)
+    else:
+        for p in papers:
+            yield (p, *_try(llm.classify, p, topic))
+
+
+def _analyze_iter(llm, jobs: list[tuple[Paper, Path | None]], topic: dict):
+    if hasattr(llm, "analyze_batch"):
+        yield from llm.analyze_batch(jobs, topic)
+    else:
+        for p, pdf in jobs:
+            yield (p, *_try(llm.analyze, p, topic, pdf))
+
+
+def tier_window(store: Store, topic: str, tier: int, today: date, lookback: int, cfg: dict,
+                topic_cfg: dict) -> date | None:
+    """這一層今天要不要搜、從哪天開始搜。回傳 None 表示今天跳過。
+
+    - tier_every_days：每幾天搜一次（例如 Tier 3 每 7 天），省下較不重要期刊的分類費用。
+    - 搜尋起點至少涵蓋 lookback_days，並往前補到上次搜尋這一層的日期：
+      隔幾天才搜、電腦關機幾天、或 fallback 策略這幾天沒搜到這一層，都不會漏掉中間的論文。
+    """
+    every = {int(k): v for k, v in {**cfg.get("tier_every_days", {}),
+                                    **topic_cfg.get("tier_every_days", {})}.items()}.get(tier, 1)
+    last = store.last_tier_run(topic, tier)
+    if every > 1 and last and (today - last).days < every:
+        return None  # 每天搜的層級不跳過：同一天重跑（例如修好設定後）仍會照常搜尋
+    since = today - timedelta(days=lookback)
+    if last:
+        since = min(since, last - timedelta(days=1))  # 與上次重疊一天，避免邊界漏掉
+    return max(since, today - timedelta(days=cfg.get("max_lookback_days", 60)))
+
+
 def run(cfg: dict, days: int | None = None, dry_run: bool = False) -> list[Path]:
     root = Path(cfg.get("output_dir", "library"))
     store = Store(root / ".state" / "papers.db")
     llm = None if dry_run else make_llm(cfg)  # engine: claude 或 codex；dry-run 不需要
     lookback = days or cfg.get("lookback_days", 3)
-    since = date.today() - timedelta(days=lookback)
+    today = date.today()
     limit = cfg.get("max_results_per_source", 50)
     max_analyze = cfg.get("max_analyses_per_topic", 10)
     digests = Digests()
@@ -138,7 +174,11 @@ def run(cfg: dict, days: int | None = None, dry_run: bool = False) -> list[Path]
         scored: list[tuple[Paper, dict]] = []
         seen_run: set[str] = set()
         for label, tier, journals in search_passes(cfg, topic, root):
-            log.info("--- %s ---", label)
+            since = tier_window(store, name, tier, today, lookback, cfg, topic)
+            if since is None:
+                log.info("--- %s：未到搜尋週期，今天略過 ---", label)
+                continue
+            log.info("--- %s（%s 起）---", label, since.isoformat())
             new = []
             # dry-run 不呼叫 AI，所以也不啟動瀏覽器備援（RSS 仍會讀）
             for p in collect(topic, since, limit, journals, cfg, use_browser=not dry_run):
@@ -159,28 +199,29 @@ def run(cfg: dict, days: int | None = None, dry_run: bool = False) -> list[Path]
                     print(f"- [T{tier}|{p.source}] {p.title} ({p.venue or ''} {p.published or ''}) "
                           f"摘要={'有' if p.abstract else '無'} PDF={'有' if p.pdf_url else '無'}")
                 continue
-            for p in new:
-                if breaker.tripped:
-                    break
-                result, err = _try(llm.classify, p, topic)
+            for p, result, err in _classify_iter(llm, new, topic):
                 if result is None or result.get("relevance", 0) < 1:
                     breaker.fail(p, err or "分類失敗（AI 拒答或沒有回應）")
                     log.warning("  分類失敗，下次重試：%s %s", p.title[:60], err)
+                    if breaker.tripped:
+                        break
                     continue
                 breaker.ok(store, name)
                 scored.append((p, result))
                 log.info("  [T%s|%s|%s] %s", tier, result["category"], result["relevance"], p.title[:80])
+            if breaker.tripped:
+                break
+            store.mark_tier_run(name, tier, today)  # 這一層已搜完；下次從今天往後接著搜
             relevant = sum(r["relevance"] >= min_rel for _, r in scored)
-            if breaker.tripped or (strategy == "fallback" and relevant >= enough):
-                if not breaker.tripped:
-                    log.info("已有 %d 篇高相關論文（門檻 %d），不再往下一層搜尋", relevant, enough)
+            if strategy == "fallback" and relevant >= enough:
+                log.info("已有 %d 篇高相關論文（門檻 %d），不再往下一層搜尋", relevant, enough)
                 break
         if dry_run:
             continue
 
         # 2) 夠相關的才下載 + 深度解析（控制成本）；優先順序：tier 越前面越優先，同 tier 依相關性
         scored.sort(key=lambda x: (x[0].extra.get("tier", 0), -x[1]["relevance"]))
-        items, analyzed, failed_analysis = [], 0, []
+        items, jobs = [], []
         for p, r in scored:
             if r["relevance"] < min_rel:
                 store.save(name, p, r["category"], r["relevance"], r["tldr"], None, None)
@@ -188,22 +229,29 @@ def run(cfg: dict, days: int | None = None, dry_run: bool = False) -> list[Path]
             cat_dir = topic_dir / r["category"]
             cat_dir.mkdir(parents=True, exist_ok=True)
             pdf = download_pdf(p, cat_dir)
-            analysis_path = None
-            if analyzed < max_analyze:
+            if len(jobs) < max_analyze:
+                if not breaker.tripped:  # AI 服務異常時，本來要解析的論文先不標記，下次重試
+                    jobs.append((p, r, pdf))
+                continue
+            store.save(name, p, r["category"], r["relevance"], r["tldr"], str(pdf) if pdf else None, None)
+            items.append(_item(p, r, None, pdf))
+
+        by_uid = {p.uid: (r, pdf) for p, r, pdf in jobs}
+        failed_analysis = []
+        for p, text, err in _analyze_iter(llm, [(p, pdf) for p, _, pdf in jobs], topic):
+            r, pdf = by_uid[p.uid]
+            if not text:
+                breaker.fail(p, err or "解析失敗（AI 拒答或沒有回應）")
+                failed_analysis.append((p, r, pdf))
+                log.warning("  解析失敗：%s %s", p.title[:60], err)
                 if breaker.tripped:
-                    continue  # AI 服務異常：這篇本來要解析，先不標記為已處理，下次重試
-                analyzed += 1
-                text, err = _try(llm.analyze, p, topic, pdf)
-                if not text:
-                    breaker.fail(p, err or "解析失敗（AI 拒答或沒有回應）")
-                    failed_analysis.append((p, r, pdf))
-                    log.warning("  解析失敗：%s %s", p.title[:60], err)
-                    continue
-                breaker.ok(store, name)
-                analysis_path = cat_dir / f"{p.slug}.md"
-                analysis_path.write_text(_header(p, r, pdf) + text, encoding="utf-8")
+                    break
+                continue
+            breaker.ok(store, name)
+            analysis_path = topic_dir / r["category"] / f"{p.slug}.md"
+            analysis_path.write_text(_header(p, r, pdf) + text, encoding="utf-8")
             store.save(name, p, r["category"], r["relevance"], r["tldr"],
-                       str(pdf) if pdf else None, str(analysis_path) if analysis_path else None)
+                       str(pdf) if pdf else None, str(analysis_path))
             items.append(_item(p, r, analysis_path, pdf))
 
         # 解析失敗的論文：還沒到重試上限就留到下次（不寫入已處理）；到上限則不再解析，但仍列進快報
@@ -216,13 +264,14 @@ def run(cfg: dict, days: int | None = None, dry_run: bool = False) -> list[Path]
             digests.ai_failed = True
             log.error("AI 服務連續 %d 次失敗，已停止本主題的處理；尚未處理的論文下次執行會重試", Breaker.LIMIT)
 
-        # 3) 每日快報
+        # 3) 每日快報（依 tier、相關性排序）
+        items.sort(key=lambda it: (it["tier"], -it["relevance"]))
         digests.append(_write_digest(root, topic, items, llm, warning=breaker.tripped))
     return digests
 
 
 def _item(p: Paper, r: dict, analysis_path: Path | None, pdf: Path | None) -> dict:
-    return {"title": p.title, "url": p.url, "venue": p.venue or "",
+    return {"title": p.title, "url": p.url, "venue": p.venue or "", "tier": p.extra.get("tier", 0),
             "tier_label": p.extra.get("tier_label", ""), "category": r["category"],
             "relevance": r["relevance"], "tldr": r["tldr"], "analysis": analysis_path, "pdf": pdf}
 

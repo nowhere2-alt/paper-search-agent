@@ -8,6 +8,11 @@ max_analyses_per_topic: 10     # 每個主題每天最多深度解析幾篇（�
 journal_list: journals.yaml
 tier_strategy: fallback        # fallback：Tier 1 的高相關論文不夠才搜 Tier 2、Tier 3；all：每次都搜全部 tier
 tier_min_results: 5            # fallback 的門檻：累計幾篇高相關論文（≥ min_relevance）就不再往下一層
+# 各層級多久搜一次（天）。沒列出的層級每天搜。搜尋時會往回補到上次搜這一層的日期，所以不會漏掉中間的論文；
+# 電腦關機幾天、或 fallback 策略這幾天沒搜到某一層，下次也會自動補搜。
+tier_every_days:
+  3: 7                         # Tier 3（相關學科）每週搜一次，省下大量分類費用
+max_lookback_days: 60          # 補搜最多往回幾天
 
 # 瀏覽器備援：API 無法使用（沒有金鑰、額度用完、連線失敗）時，由 Claude 操作瀏覽器到資料庫網站搜尋。
 # 需要先安裝：pip install playwright && playwright install chromium
@@ -23,9 +28,15 @@ browser:
   extra_allowed_hosts: []      # 學校 SSO 登入網域，例如 [sso.youruniversity.edu.tw]
 
 claude:
-  model: claude-opus-5-5
+  model: claude-opus-5-5       # 深度解析與每日總覽用的模型
+  # 分類只看標題與摘要，用 Haiku 5.5 費用約為 Opus 5.5 的 1/40。想讓分類也用 Opus，把這行刪掉即可。
+  classify_model: claude-haiku-5-5
   language: 繁體中文
   analysis_effort: high        # low / medium / high / xhigh / max；越高越深入也越貴
+  # 分類與解析改用 Message Batches API：費用為一般呼叫的一半，品質相同，但要等批次跑完（通常幾分鐘）。
+  # 超過 batch_timeout_min 沒跑完會取消批次，剩下的改用一般呼叫，不會讓排程卡住。想即時看結果就改成 false。
+  use_batch: true
+  batch_timeout_min: 60        # 最壞情況：每層分類＋解析各一批，60 分鐘×4 仍在 GitHub Actions 的 6 小時上限內
 
 topics:
   - name: 生成式 AI 在觀光餐旅業的應用

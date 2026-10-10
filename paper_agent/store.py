@@ -9,7 +9,7 @@ from __future__ import annotations
 
 import json
 import sqlite3
-from datetime import datetime
+from datetime import date, datetime
 from pathlib import Path
 
 from .models import Paper
@@ -40,6 +40,12 @@ CREATE TABLE IF NOT EXISTS failures (
     last_error TEXT,
     updated_at TEXT,
     PRIMARY KEY (topic, uid)
+);
+CREATE TABLE IF NOT EXISTS tier_runs (
+    topic TEXT NOT NULL,
+    tier INTEGER NOT NULL,
+    last_date TEXT NOT NULL,
+    PRIMARY KEY (topic, tier)
 );
 """
 
@@ -98,4 +104,12 @@ class Store:
         )
         self.db.execute("DELETE FROM failures WHERE topic = ? AND (uid = ? OR (title_key IS NOT NULL AND title_key = ?))",
                         (topic, paper.uid, paper.title_key))
+        self.db.commit()
+
+    def last_tier_run(self, topic: str, tier: int) -> date | None:
+        row = self.db.execute("SELECT last_date FROM tier_runs WHERE topic = ? AND tier = ?", (topic, tier)).fetchone()
+        return date.fromisoformat(row[0]) if row else None
+
+    def mark_tier_run(self, topic: str, tier: int, day: date) -> None:
+        self.db.execute("INSERT OR REPLACE INTO tier_runs VALUES (?,?,?)", (topic, tier, day.isoformat()))
         self.db.commit()
